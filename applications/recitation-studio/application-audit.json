@@ -1,0 +1,18 @@
+{
+  "$schema": "../../utils/references/application-audit.schema.json",
+  "schema_version": 1,
+  "application_id": "recitation-studio",
+  "source_root": "applications/recitation-studio",
+  "documents": {
+    "readme": "applications/recitation-studio/README.md",
+    "prd": "docs/PRDs/recitation-studio.md"
+  },
+  "version": {
+    "source": "package.json",
+    "field": "version"
+  },
+  "implementation": {
+    "state_machine": "applications/recitation-studio/src/model.ts",
+    "data_model": "applications/recitation-studio/src/model.ts"
+  }
+}
