@@ -27,7 +27,7 @@ def discover_docs(root: Path) -> list[Path]:
     return sorted(found)
 
 def active_skill_dirs(root: Path) -> set[str]:
-    base = root / 'skills'
+    base = root / '.agents' / 'skills'
     return {p.name for p in base.iterdir() if p.is_dir() and p.name != '.backup' and (p / 'SKILL.md').is_file()} if base.is_dir() else set()
 
 def add(findings, kind, path, suggestion, current=None, expected=None, evidence=None, confidence='deterministic', section=None):
@@ -50,7 +50,7 @@ def parse_requirements(path: Path) -> dict[str, str]:
 
 def imported_modules(root: Path) -> set[str]:
     mods = set()
-    for base in (root/'skills', root/'utils', root/'runtime'):
+    for base in (root / '.agents' / 'skills', root/'utils', root/'runtime'):
         if not base.exists(): continue
         for p in base.rglob('*.py'):
             parts = set(p.relative_to(root).parts)
@@ -65,7 +65,7 @@ def imported_modules(root: Path) -> set[str]:
 def installed_versions(root: Path) -> dict[str, str]:
     exe = root/'runtime/.venv/Scripts/python.exe' if os.name == 'nt' else root/'runtime/.venv/bin/python'
     if not exe.is_file(): return {}
-    code = 'import importlib.metadata as m, json; print(json.dumps({d.metadata["Name"].lower().replace("_","-"):d.version for d in m.distributions()}))'
+    code = 'import importlib.metadata as m, json; print(json.dumps({d.metadata["Name"].lower().replace("_","-"):d.version for d in m.distributions() if d.metadata.get("Name")}))'
     try:
         out = subprocess.check_output([str(exe), '-c', code], text=True, stderr=subprocess.STDOUT, timeout=20)
         return json.loads(out)
@@ -118,7 +118,7 @@ def document_reference_findings(root: Path, docs: list[Path]) -> list[dict[str, 
             for reference in documents.values():
                 if isinstance(reference, str):
                     app_contexts[(root / reference).resolve()] = manifest_path.parent
-    static_roots = ({'applications', 'docs', 'skills', 'utils', 'runtime', 'config'}
+    static_roots = ({'applications', 'docs', '.agents', 'utils', 'runtime', 'config'}
                     | {p.name for p in root.iterdir() if p.is_dir()}) - EXCLUDED
     for doc in docs:
         seen = set()
@@ -132,8 +132,8 @@ def document_reference_findings(root: Path, docs: list[Path]) -> list[dict[str, 
                 level, name = len(heading.group(1)), heading.group(2).strip('`')
                 if level <= heading_level:
                     skill_context = None
-                if (root / 'skills' / name / 'SKILL.md').is_file():
-                    skill_context, heading_level = root / 'skills' / name, level
+                if (root / '.agents' / 'skills' / name / 'SKILL.md').is_file():
+                    skill_context, heading_level = root / '.agents' / 'skills' / name, level
             if skill_context:
                 skill_contexts[number] = skill_context
         for number, line in prose_lines(text):
@@ -154,7 +154,7 @@ def _check_reference(root, doc, raw, line, start, end, skill_context, app_contex
     if not parts or token.startswith('/'):
         return
     first = parts[0]
-    if first in {'outputs', 'logs', 'tmp'}:
+    if first in {'outputs', 'logs', 'tmp'} or token.startswith('runtime/.venv/'):
         return
     prefix, suffix = line[:start], line[end:]
     if re.search(r'(?:旧|历史|迁移输入|不再维护)\s*$', prefix) and re.search(
@@ -208,17 +208,17 @@ def audit(root: Path, previous: dict[str, Any] | None = None) -> tuple[dict[str,
     elif market_version != version: add(findings,'version_mismatch','config/plugin/marketplace.json','使 marketplace 版本与 VERSION 一致',market_version,version,['VERSION'])
     registered={Path(str(x).removeprefix('./')).name for x in manifest.get('skills',[])}
     active=active_skill_dirs(root)
-    if registered != active: add(findings,'skills_registry_mismatch','config/plugin/plugin.json','使注册 Skills 与 skills/ 下活动目录一致',sorted(registered),sorted(active),['skills','config/plugin/plugin.json'])
+    if registered != active: add(findings,'skills_registry_mismatch','config/plugin/plugin.json','使注册 Skills 与 .agents/skills/ 下活动目录一致',sorted(registered),sorted(active),['.agents/skills','config/plugin/plugin.json'])
     metadata = load_skill_metadata(root)
     for skill_name in sorted(active):
         item = metadata.get(skill_name, {})
         category = item.get('category')
         if not category:
-            add(findings, 'skill_category_missing', f'skills/{skill_name}/SKILL.md', '在 YAML front matter 中声明 category', None, sorted(ALLOWED_CATEGORIES), [f'skills/{skill_name}/SKILL.md'])
+            add(findings, 'skill_category_missing', f'.agents/skills/{skill_name}/SKILL.md', '在 YAML front matter 中声明 category', None, sorted(ALLOWED_CATEGORIES), [f'.agents/skills/{skill_name}/SKILL.md'])
         elif category not in ALLOWED_CATEGORIES:
-            add(findings, 'skill_category_invalid', f'skills/{skill_name}/SKILL.md', '将 category 改为允许的分类值', category, sorted(ALLOWED_CATEGORIES), [f'skills/{skill_name}/SKILL.md'])
+            add(findings, 'skill_category_invalid', f'.agents/skills/{skill_name}/SKILL.md', '将 category 改为允许的分类值', category, sorted(ALLOWED_CATEGORIES), [f'.agents/skills/{skill_name}/SKILL.md'])
         if item.get('name') and item['name'] != skill_name:
-            add(findings, 'skill_metadata_name_mismatch', f'skills/{skill_name}/SKILL.md', '使 front matter 的 name 与 Skill 目录名一致', item['name'], skill_name, [f'skills/{skill_name}/SKILL.md'])
+            add(findings, 'skill_metadata_name_mismatch', f'.agents/skills/{skill_name}/SKILL.md', '使 front matter 的 name 与 Skill 目录名一致', item['name'], skill_name, [f'.agents/skills/{skill_name}/SKILL.md'])
     catalog_path = root / 'docs/Skills_说明书.md'
     documented_categories = load_documented_categories(catalog_path) if catalog_path.is_file() else {}
     category_occurrences = load_documented_category_occurrences(catalog_path) if catalog_path.is_file() else {}
@@ -237,19 +237,19 @@ def audit(root: Path, previous: dict[str, Any] | None = None) -> tuple[dict[str,
         if len(occurrences) > 1:
             add(findings, 'skill_catalog_duplicate', 'docs/Skills_说明书.md', '确保每个 Skill 只出现在一个分类概览表中', occurrences, [expected_label] if expected_label else [], ['docs/Skills_说明书.md'])
         if documented_category and expected_label and documented_category != expected_label:
-            add(findings, 'skill_category_mismatch', 'docs/Skills_说明书.md', '使说明书分类与 SKILL.md front matter 的 category 一致', documented_category, expected_label, ['docs/Skills_说明书.md', f'skills/{skill_name}/SKILL.md'])
+            add(findings, 'skill_category_mismatch', 'docs/Skills_说明书.md', '使说明书分类与 SKILL.md front matter 的 category 一致', documented_category, expected_label, ['docs/Skills_说明书.md', f'.agents/skills/{skill_name}/SKILL.md'])
         if not documented_category:
-            add(findings, 'skill_catalog_missing', 'docs/Skills_说明书.md', '在分类概览表中补充活动 Skill', None, expected_label or sorted(category_labels.values()), ['docs/Skills_说明书.md', f'skills/{skill_name}/SKILL.md'])
+            add(findings, 'skill_catalog_missing', 'docs/Skills_说明书.md', '在分类概览表中补充活动 Skill', None, expected_label or sorted(category_labels.values()), ['docs/Skills_说明书.md', f'.agents/skills/{skill_name}/SKILL.md'])
     documented = load_documented_scenarios(catalog_path) if catalog_path.is_file() else {}
     for skill_name in sorted(active):
         examples = documented.get(skill_name, [])
         if not examples:
-            add(findings, 'skill_scenario_missing', 'docs/Skills_说明书.md', '在对应 Skill 详细章节添加至少一个具体场景示例', [], ['id', 'user_request', 'when_to_call', 'invocation', 'expected_output'], ['docs/Skills_说明书.md', f'skills/{skill_name}/SKILL.md'])
+            add(findings, 'skill_scenario_missing', 'docs/Skills_说明书.md', '在对应 Skill 详细章节添加至少一个具体场景示例', [], ['id', 'user_request', 'when_to_call', 'invocation', 'expected_output'], ['docs/Skills_说明书.md', f'.agents/skills/{skill_name}/SKILL.md'])
             continue
         for example in examples:
             missing = validate_scenario(example)
             if missing:
-                add(findings, 'skill_scenario_invalid', 'docs/Skills_说明书.md', '补齐具体场景示例的结构化字段', missing, [], ['docs/Skills_说明书.md', f'skills/{skill_name}/SKILL.md'])
+                add(findings, 'skill_scenario_invalid', 'docs/Skills_说明书.md', '补齐具体场景示例的结构化字段', missing, [], ['docs/Skills_说明书.md', f'.agents/skills/{skill_name}/SKILL.md'])
     documented_names = {name for name in documented if name in active}
     for name in sorted(set(documented) - active):
         if name not in {'AI 辅助学习', 'AI 辅助教学', 'AI 辅助科研', '常用工具（与 AI 辅助教育无关）', '项目功能'}:
@@ -265,11 +265,11 @@ def audit(root: Path, previous: dict[str, Any] | None = None) -> tuple[dict[str,
     try: mapping=json.loads(map_path.read_text(encoding='utf-8'))
     except Exception: mapping={'yaml':'pyyaml','jsonschema':'jsonschema'}
     std=set(getattr(sys,'stdlib_module_names',())) | {'__future__'}
-    local={p.stem for base in (root/'skills',root/'utils',root/'runtime') if base.exists() for p in base.rglob('*.py')}
+    local={p.stem for base in (root / '.agents' / 'skills',root/'utils',root/'runtime') if base.exists() for p in base.rglob('*.py')}
     mapping={str(k).lower():str(v).lower() for k,v in mapping.items()}
     third={mapping.get(m,m) for m in mods if m not in std and m not in local and m not in {'skills','utils','runtime'}}
     undeclared=sorted(third-set(req))
-    if undeclared: add(findings,'undeclared_import','runtime/.venv/requirements.txt','声明活动 Python 脚本使用的第三方包',undeclared,sorted(req),['skills','utils','runtime'])
+    if undeclared: add(findings,'undeclared_import','runtime/.venv/requirements.txt','声明活动 Python 脚本使用的第三方包',undeclared,sorted(req),['.agents/skills','utils','runtime'])
     installed=installed_versions(root)
     if (root/'runtime/.venv').exists() and not installed: add(findings,'environment_unreadable','runtime/.venv','使用可用的虚拟环境 Python 读取实际安装版本',None,'可读取包版本',['runtime/.venv'])
     missing=sorted(set(req)-set(installed)) if installed else []

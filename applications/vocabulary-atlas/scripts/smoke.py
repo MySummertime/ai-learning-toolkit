@@ -55,11 +55,11 @@ def call(base: str, path: str, method: str = "GET", body: dict | None = None) ->
 
 
 def fixture(root: Path) -> None:
-    (root / "skills" / "build-word-entry" / "references").mkdir(parents=True)
+    (root / ".agents" / "skills" / "build-word-entry" / "references").mkdir(parents=True)
     (root / "applications" / "vocabulary-atlas").mkdir(parents=True)
     (root / "outputs" / "英文词典" / "entries").mkdir(parents=True)
-    shutil.copy2(ROOT / "skills" / "build-word-entry" / "references" / "entry.schema.json",
-                 root / "skills" / "build-word-entry" / "references" / "entry.schema.json")
+    shutil.copy2(ROOT / ".agents" / "skills" / "build-word-entry" / "references" / "entry.schema.json",
+                 root / ".agents" / "skills" / "build-word-entry" / "references" / "entry.schema.json")
     shutil.copy2(ROOT / "applications" / "vocabulary-atlas" / "config.yaml", root / "applications" / "vocabulary-atlas" / "config.yaml")
     (root / "utils" / "references").mkdir(parents=True)
     shutil.copy2(ROOT / "utils" / "references" / "dictionary-graph-v1.schema.json",

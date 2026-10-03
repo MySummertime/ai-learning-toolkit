@@ -22,7 +22,7 @@ from utils.scripts.timestamp import iso_timestamp, unique_filename_timestamp
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = ROOT / "utils" / "references" / "dictionary-plan-v1.schema.json"
-SCHEDULE_SCHEMA = ROOT / "skills" / "schedule-ebbinghaus-plan" / "references" / "result.schema.json"
+SCHEDULE_SCHEMA = ROOT / ".agents" / "skills" / "schedule-ebbinghaus-plan" / "references" / "result.schema.json"
 HULU_SCHEDULE_SCHEMA = ROOT / "utils" / "references" / "hulu-schedule-v1.schema.json"
 
 
@@ -126,7 +126,7 @@ class PlanStore:
         input_path = runs_root / run_id / "schedule-request.json"
         write_text_atomic(input_path, json.dumps(skill_request, ensure_ascii=False) + "\n")
         skill_name = "schedule-ebbinghaus-plan"
-        command = [sys.executable, str(ROOT / "skills" / skill_name / "scripts" / "cli.py"),
+        command = [sys.executable, str(ROOT / ".agents" / "skills" / skill_name / "scripts" / "cli.py"),
                    "start", "--root", str(self.root), "--input", str(input_path)]
         run = subprocess.run(command, cwd=ROOT, capture_output=True, text=True,
                              encoding="utf-8", errors="replace", timeout=120)

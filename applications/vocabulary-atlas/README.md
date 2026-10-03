@@ -34,17 +34,17 @@
 
 图谱响应遵循 `utils/references/dictionary-graph-v1.schema.json`。聚焦词条时先展示词族和分组抽取的直接邻居，“显示其他节点”可展开剩余关联；待核验同义／近义候选仅在界面归为“近义词 · 按规则分类”。词条 `familyId` 的确定性合并在 `build-word-entry` 发布状态机中处理。
 
-新建词条在 `build-word-entry` 发布阶段自动补入有词性依据的规则词形。历史词条可运行 `python skills/build-word-entry/scripts/rule_inflections.py start --project <projectId>`，随后用返回的运行 ID 执行 `verify --run-id <runId>`。状态机重复运行不会重复写入词形。新来源直接证实原规则词形时，原 `formId` 升级为来源支持状态。
+新建词条在 `build-word-entry` 发布阶段自动补入有词性依据的规则词形。历史词条可运行 `python .agents/skills/build-word-entry/scripts/rule_inflections.py start --project <projectId>`，随后用返回的运行 ID 执行 `verify --run-id <runId>`。状态机重复运行不会重复写入词形。新来源直接证实原规则词形时，原 `formId` 升级为来源支持状态。
 
 背单词页可为同一项目建立多个艾宾浩斯或葫芦背书法计划。首页显示计划名、创建时间、轮数和当前轮进度，并可设置或确认删除计划。修改项目、记忆方法、开始日期或背诵数量会重新调用艾宾浩斯 skill 或葫芦应用排程状态机，清空该计划所有轮次的通过记录；删除计划时同时关闭其标签页。练习页在“今日 X 词”左侧显示当前分页和当天完整排程的通过比例。艾宾浩斯计划安排复习并在当日末尾重试未通过词；葫芦计划只安排首次学习，当前页至少 80% 的单词通过后才可前进，未达标则回到学习模式。每遍完成后可手动开始下一轮。练习模式按空格逐词揭示词性和中文释义。乱序只改变稳定的展示顺序，不改变计划日程。计划覆盖的日期与当日词表可在日历页查看。
 
 ## 验证
 
-运行 `npm run build`、`runtime/.venv/Scripts/python.exe applications/vocabulary-atlas/scripts/smoke.py`、`runtime/.venv/Scripts/python.exe applications/vocabulary-atlas/scripts/smoke_ui.py`，以及现有 `runtime/.venv/Scripts/python.exe skills/build-word-entry/scripts/smoke.py`。应用测试使用临时目录，不修改真实学习状态；浏览器测试将页面预览写入 `outputs/vocabulary-atlas/preview-word-page.png`。
+运行 `npm run build`、`runtime/.venv/Scripts/python.exe applications/vocabulary-atlas/scripts/smoke.py`、`runtime/.venv/Scripts/python.exe applications/vocabulary-atlas/scripts/smoke_ui.py`，以及现有 `runtime/.venv/Scripts/python.exe .agents/skills/build-word-entry/scripts/smoke.py`。应用测试使用临时目录，不修改真实学习状态；浏览器测试将页面预览写入 `outputs/vocabulary-atlas/preview-word-page.png`。
 
 图谱标题与节点统计之间可编辑当前项目名，Enter／失焦保存，Esc 撤销。未固定的单词／待建词标签会被下一个打开的词替换；固定按钮或双击保留标签。设置和收藏夹独立保留。项目预览的标题、关闭按钮与词数固定，仅词表滚动。
 
-唯一正式词条存储为 `dicts/a.jsonl` 至 `z.jsonl`，各项目只引用 `wordId`，建词及审核不再创建每词工作文件。拼写关系使用全局 `spelling-index.json`，LCS ≥ 0.75，排除别名、屈折词形和已确认同族词；未建词条也显示节点，齐备后双向发布。导入和编辑项目、建词完成后自动增量维护。手动维护入口：`runtime/.venv/Scripts/python.exe skills/build-word-entry/scripts/spelling_relations.py start --full`；支持 `status / resume / verify --run-id <runId>`，日志位于 `logs/dictionary-spelling/runs/`。
+唯一正式词条存储为 `dicts/a.jsonl` 至 `z.jsonl`，各项目只引用 `wordId`，建词及审核不再创建每词工作文件。拼写关系使用全局 `spelling-index.json`，LCS ≥ 0.75，排除别名、屈折词形和已确认同族词；未建词条也显示节点，齐备后双向发布。导入和编辑项目、建词完成后自动增量维护。手动维护入口：`runtime/.venv/Scripts/python.exe .agents/skills/build-word-entry/scripts/spelling_relations.py start --full`；支持 `status / resume / verify --run-id <runId>`，日志位于 `logs/dictionary-spelling/runs/`。
 
 葫芦均匀分组由 `utils/scripts/hulu_schedule.py` 的可恢复应用状态机执行，Schema 位于 `utils/references/hulu-schedule-v1.schema.json`。新葫芦计划 `scheduleRunId` 为 `null`，旧计划兼容；独立 skill 已移至 `tmp/schedule-hulu-plan/` 并取消注册。
 

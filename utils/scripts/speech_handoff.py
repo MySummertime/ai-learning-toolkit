@@ -57,7 +57,7 @@ def verify_handoff(root: Path, value: dict) -> dict:
     arguments = (["--run-id", value["producer_run_id"]] if value["producer_skill"] == "convert-copy-to-transcript"
                  else ["--run-dir", str(paths["manifest"].parent)])
     implementation_root = Path(__file__).resolve().parents[2]
-    result = subprocess.run([sys.executable, str(implementation_root / "skills" / value["producer_skill"] / "scripts/cli.py"),
+    result = subprocess.run([sys.executable, str(implementation_root / ".agents" / "skills" / value["producer_skill"] / "scripts/cli.py"),
                              "verify", "--root", str(root), *arguments], capture_output=True, text=True,
                             encoding="utf-8", shell=False)
     if result.returncode:

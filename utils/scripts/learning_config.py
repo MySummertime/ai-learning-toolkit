@@ -39,13 +39,13 @@ def validate_config(skill, value):
     return value
 
 def load_config(skill, root=ROOT):
-    value = yaml.safe_load((root / 'skills' / skill / 'config.yaml').read_text(encoding='utf-8-sig'))
+    value = yaml.safe_load((root / '.agents' / 'skills' / skill / 'config.yaml').read_text(encoding='utf-8-sig'))
     validate_config(skill, value)
     return {'config': value, 'revision': json_digest(value)}
 
 def save_config(skill, value, expected_revision, root=ROOT):
     validate_config(skill, value)
-    path = root / 'skills' / skill / 'config.yaml'
+    path = root / '.agents' / 'skills' / skill / 'config.yaml'
     with project_lock(root / 'logs' / '交互式学习' / f'{skill}.lock', 'save-config'):
         if load_config(skill, root)['revision'] != expected_revision:
             raise ValueError('配置版本冲突，请重新加载')

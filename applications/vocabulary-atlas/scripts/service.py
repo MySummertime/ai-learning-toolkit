@@ -33,7 +33,7 @@ class RunManager:
         self.root = root
         self.jobs: dict[str, dict] = {}
         self.lock = threading.RLock()
-        self.skill = root / "skills" / "build-word-entry" / "scripts" / "cli.py"
+        self.skill = root / ".agents" / "skills" / "build-word-entry" / "scripts" / "cli.py"
         self.python = Path(sys.executable)
 
     def existing(self, lemma: str) -> str | None:

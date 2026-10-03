@@ -42,7 +42,7 @@ def invoke(skill_dir: Path, runner: str, argv: list[str], *, start_command: str)
         if Path(run_id).name != run_id or run_id in {".", ".."}:
             print(json.dumps({"status": "error", "error": "Invalid run ID"}), file=sys.stderr)
             return 2
-        root = Path(argv[argv.index("--root") + 1]) if "--root" in argv else skill_dir.parents[1]
+        root = Path(argv[argv.index("--root") + 1]) if "--root" in argv else skill_dir.parents[2]
         argv = [*argv[:position], "--run-dir", str(root / "outputs/run-speech-to-text/runs" / run_id), *argv[position + 2:]]
     if argv and argv[0] == "start":
         argv = [start_command, *argv[1:]]
@@ -98,13 +98,13 @@ def invoke(skill_dir: Path, runner: str, argv: list[str], *, start_command: str)
 
 def verify_installation(skill_dir: Path, environment: bool = False) -> dict:
     import importlib.util
-    project = skill_dir.resolve().parents[1]
+    project = skill_dir.resolve().parents[2]
     errors = []
     for filename in ("SKILL.md", "scripts/cli.py", "references/import-provenance.json"):
         if not (skill_dir / filename).is_file():
             errors.append("Missing " + filename)
     plugin = json.loads((project / "config/plugin/plugin.json").read_text(encoding="utf-8"))
-    if "./skills/" + skill_dir.name not in plugin["skills"]:
+    if "./.agents/skills/" + skill_dir.name not in plugin["skills"]:
         errors.append("Skill is not registered")
     if environment:
         modules = ["yaml", "jsonschema", "dotenv"]

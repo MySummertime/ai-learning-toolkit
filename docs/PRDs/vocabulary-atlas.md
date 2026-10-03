@@ -55,7 +55,7 @@ OED、Collins、Merriam-Webster、Vocabulary.com、Dictionary.com 和 WantWords 
 
 1.3 词条中每个例句、搭配和短语内容项必须有独立中文翻译及来源或 AI 生成标记；例句额外保存英文目标词与中文对应词的左闭右开字符区间，Markdown 由脚本加粗，JSON 正文保持纯文本。来源提供成对中译时记录该例句的具体定位；没有来源中译时可由 AI 补充并保存两位小数置信度与待核验状态。搭配和短语的译文不加粗。已有词条升级时保持稳定内容 ID，缺译进入可恢复的质量复核，不静默丢弃。
 
-拼写关系维护入口为 `skills/build-word-entry/scripts/spelling_relations.py`，支持 `start --full`、增量 `start`、`status`、`resume` 和 `verify`。首次汇总所有已有项目及总词库中的规范化词面；新增或编辑项目后，仅计算新增词与旧词、以及新增词之间的词对。`spelling-index.json` 使用 `utils/references/dictionary-spelling-v1.schema.json`，保存全局词面、算法版本、阈值、无序词对的 LCS 长度和发布状态；不复制词条正文。两端词条齐备后双向写入 `relationships[]`，未齐备时由索引展示已确认的拼写相似关系及待建节点。待建表示词条未建立，不表示字面相似待核验。总览显示当前可见节点间的词对，包含已显示的词形与派生节点，聚焦可展开项目外直接相似词，遵循原有筛选和 500 节点上限。总览展示当前可见节点间全部符合筛选条件的拼写相似边，不设置每节点连接数限制；继续排除同族、去重并遵守 500 节点上限，选中节点的展示策略不变。
+拼写关系维护入口为 `.agents/skills/build-word-entry/scripts/spelling_relations.py`，支持 `start --full`、增量 `start`、`status`、`resume` 和 `verify`。首次汇总所有已有项目及总词库中的规范化词面；新增或编辑项目后，仅计算新增词与旧词、以及新增词之间的词对。`spelling-index.json` 使用 `utils/references/dictionary-spelling-v1.schema.json`，保存全局词面、算法版本、阈值、无序词对的 LCS 长度和发布状态；不复制词条正文。两端词条齐备后双向写入 `relationships[]`，未齐备时由索引展示已确认的拼写相似关系及待建节点。待建表示词条未建立，不表示字面相似待核验。总览显示当前可见节点间的词对，包含已显示的词形与派生节点，聚焦可展开项目外直接相似词，遵循原有筛选和 500 节点上限。总览展示当前可见节点间全部符合筛选条件的拼写相似边，不设置每节点连接数限制；继续排除同族、去重并遵守 500 节点上限，选中节点的展示策略不变。
 
 维护状态机为 `prepared → snapshotting_vocabulary → selecting_pairs → calculating_similarity → preparing_updates → validating_updates → committing → verifying → completed`，错误进入 `paused_retryable_error`，恢复继续原检查点；日志位于 `logs/dictionary-spelling/runs/<run-id>/`。多分桶发布保存可恢复事务日志，修订冲突暂停；重复运行不得重复关系或无故提高词条修订。 `verify` 核对正式索引与运行发布结果、LCS 重算、别名／词形／词族排除、两端词条就绪状态及双向记录。历史词面即使已移出项目且无关联边，仍可作为单节点聚焦。
 

@@ -59,7 +59,7 @@ class DictionaryStore:
         self.dicts_dir = self.data / "dicts"
         self.projects_dir = self.data / "projects"
         self.lock = threading.RLock()
-        schema_path = self.root / "skills" / "build-word-entry" / "references" / "entry.schema.json"
+        schema_path = self.root / ".agents" / "skills" / "build-word-entry" / "references" / "entry.schema.json"
         self.entry_validator = Draft202012Validator(json.loads(schema_path.read_text(encoding="utf-8")))
         graph_schema = self.root / "utils" / "references" / "dictionary-graph-v1.schema.json"
         self.graph_validator = Draft202012Validator(json.loads(graph_schema.read_text(encoding="utf-8")))

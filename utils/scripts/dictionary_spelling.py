@@ -229,7 +229,7 @@ def advance(root: Path, run_id: str) -> dict:
                 elif stage == "validating_updates":
                     validate_index(read_json(log / "index.json"))
                     from jsonschema import Draft202012Validator
-                    validator = Draft202012Validator(read_json(ROOT / "skills" / "build-word-entry" / "references" / "entry.schema.json"))
+                    validator = Draft202012Validator(read_json(ROOT / ".agents" / "skills" / "build-word-entry" / "references" / "entry.schema.json"))
                     for entry in read_json(log / "updates.json").values():
                         validator.validate(entry)
                 elif stage == "committing":

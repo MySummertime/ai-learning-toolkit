@@ -11,7 +11,7 @@ This repository builds on [HytidelLegend/htd-ai-augmented-education](https://git
 | Path | Purpose |
 | --- | --- |
 | [`applications/`](applications/README.md) | Three local apps: `recitation-studio`, `image-recall-studio`, and `vocabulary-atlas` |
-| [`skills/`](docs/Skills_说明书.md) | Agent workflows for writing, vocabulary, memory, speech, file conversion, and project maintenance |
+| [`.agents/skills/`](.agents/skills/) | Agent workflows for writing, vocabulary, memory, speech, file conversion, and project maintenance |
 | [`docs/`](docs/PRDs/AI辅助教育项目.md) | Requirements, architecture, contribution, and security documents |
 | [`utils/`](utils/) | Shared scripts and data structures |
 
@@ -47,7 +47,7 @@ Press `Ctrl+C` to stop an app. To update the Conda environment, run `conda env u
 
 ## Use the Skills
 
-Give your Agent access to [AGENTS.md](AGENTS.md) and the [Skills guide](docs/Skills_说明书.md), then load the relevant `skills/<name>/SKILL.md` for the task. The retained `htd-ai-augmented-education` routing Skill can help identify which capabilities a learning request needs.
+Give your Agent access to [AGENTS.md](AGENTS.md) and the [Skills guide](docs/Skills_说明书.md), then load the relevant `.agents/skills/<name>/SKILL.md` for the task. The retained `htd-ai-augmented-education` routing Skill can help identify which capabilities a learning request needs.
 
 Plugin manifests live in `config/plugin/`; native plugin installation paths depend on the Agent. Generated results go to `outputs/` and logs to `logs/`. Neither directory is tracked by Git.
 

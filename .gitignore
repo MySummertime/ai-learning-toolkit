@@ -1,46 +1,46 @@
-logs/
-outputs/
-tmp/
+# Local runs and credentials
+/logs/
+/outputs/
+/tmp/
 .env
-runtime/*
-!runtime/README.md
-!runtime/.venv/
-runtime/.venv/*
-!runtime/.venv/requirements.txt
+.env.*
+!.env.example
+
+# Isolated runtime: retain the documented requirement snapshot
+/runtime/*
+!/runtime/README.md
+!/runtime/.venv/
+/runtime/.venv/*
+!/runtime/.venv/requirements.txt
+
+# Dependencies and generated build output
 node_modules/
 dist/
 *.tsbuildinfo
 __pycache__/
 *.py[cod]
 .cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage*
 .DS_Store
 Thumbs.db
 
-git-push.ps1
-
-tests/
-!skills/format-conversion-master/tests/
-!skills/format-conversion-master/tests/*.py
-
-# Root-level request and English-writing sample payloads
+# Local helper and root-level payloads
+/git-push.ps1
 /en_*.json
 /request*.json
 
-# User-provided en-writing-master tools; keep the public usage notice tracked
-/skills/en-writing-master/tools/*
-!/skills/en-writing-master/tools/README.md
+# User-supplied tools; keep only their public usage notice
+/.agents/skills/en-writing-master/tools/*
+!/.agents/skills/en-writing-master/tools/README.md
 
-/skills/beta-*/
+# Local backup, draft skills, and retired application
+/.agents/.backup/
+/.agents/skills/beta-*/
+/applications/交互式学习/
 
-examples/
-
-applications/交互式学习/
-
-!skills/run-speech-to-text/tests/
-!skills/run-speech-to-text/tests/*.py
-
-!skills/run-text-to-speech/tests/
-!skills/run-text-to-speech/tests/*.py
-
-!skills/convert-copy-to-transcript/tests/
-!skills/convert-copy-to-transcript/tests/*.py
+# Root-only scratch directories; nested skill tests/examples are source files
+/tests/
+/examples/

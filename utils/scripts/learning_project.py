@@ -67,7 +67,7 @@ def safe_path(root, value):
     return resolved
 
 def navigation_preflight(root, path, return_message=False, material_project=None):
-    cli = ROOT / 'skills/beta-build-curriculum-navigation/scripts/cli.py'
+    cli = ROOT / '.agents/skills/beta-build-curriculum-navigation/scripts/cli.py'
     extra = ['--material-project', str(material_project)] if material_project is not None else []
     result = subprocess.run([sys.executable, str(cli), 'verify', '--root', str(root), '--navigation', str(path), *extra],
                             capture_output=True, text=True, encoding='utf-8')

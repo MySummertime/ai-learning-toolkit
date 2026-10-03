@@ -39,7 +39,7 @@ def parse_front_matter(text: str) -> dict[str, Any]:
 
 def load_skill_metadata(root: Path) -> dict[str, dict[str, Any]]:
     """Return active Skill metadata keyed by Skill directory name."""
-    base = root / "skills"
+    base = root / ".agents" / "skills"
     if not base.is_dir():
         return {}
     result = {}
@@ -50,7 +50,7 @@ def load_skill_metadata(root: Path) -> dict[str, dict[str, Any]]:
         result[path.parent.name] = {
             "path": path.relative_to(root).as_posix(),
             "name": data.get("name"),
-            "category": data.get("category"),
+            "category": (data.get("metadata") or {}).get("category"),
             "description": data.get("description"),
         }
     return result

@@ -31,7 +31,7 @@ def safe_path(root: Path, value: str | Path) -> Path:
 
 @lru_cache(maxsize=1)
 def navigation_verifier():
-    path = ROOT / 'skills' / NAV / 'scripts/build_curriculum_navigation.py'
+    path = ROOT / '.agents' / 'skills' / NAV / 'scripts/build_curriculum_navigation.py'
     spec = importlib.util.spec_from_file_location('selection_navigation_verifier', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

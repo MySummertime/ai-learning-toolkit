@@ -11,7 +11,7 @@
 | 路径 | 用途 |
 | --- | --- |
 | [`applications/`](applications/README.md) | `recitation-studio`、`image-recall-studio`、`vocabulary-atlas` 三个本地应用 |
-| [`skills/`](docs/Skills_说明书.md) | 写作、词汇、记忆、语音、格式转换和项目维护等 Agent 工作流 |
+| [`.agents/skills/`](.agents/skills/) | 写作、词汇、记忆、语音、格式转换和项目维护等 Agent 工作流 |
 | [`docs/`](docs/PRDs/AI辅助教育项目.md) | 需求、架构、贡献和安全文档 |
 | [`utils/`](utils/) | 共享脚本与数据结构 |
 
@@ -47,7 +47,7 @@ done
 
 ## 使用 Skills
 
-让 Agent 读取 [AGENTS.md](AGENTS.md) 与 [Skills 说明书](docs/Skills_说明书.md)，再根据任务打开相应的 `skills/<名称>/SKILL.md`。例如，`htd-ai-augmented-education` 是保留的项目路由 Skill，可帮助选择完成学习任务所需的能力。
+让 Agent 读取 [AGENTS.md](AGENTS.md) 与 [Skills 说明书](docs/Skills_说明书.md)，再根据任务打开相应的 `.agents/skills/<名称>/SKILL.md`。例如，`htd-ai-augmented-education` 是保留的项目路由 Skill，可帮助选择完成学习任务所需的能力。
 
 插件清单位于 `config/plugin/`；不同 Agent 的原生插件目录需要按各自的约定配置。运行产物和日志分别写入 `outputs/` 与 `logs/`，不纳入 Git。
 
