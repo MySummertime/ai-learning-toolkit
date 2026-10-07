@@ -1,13 +1,13 @@
 import type { MemorySpan, Project, ProjectRecord, RecentProject } from './model';
 
-const base = import.meta.env.VITE_BEISHU_API_URL || 'http://127.0.0.1:5176';
+const base = import.meta.env.VITE_BEISHU_API_URL;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
     response = await fetch(base + path, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) } });
   } catch {
-    throw new Error('无法连接本地服务，请通过 run.ps1 启动应用');
+    throw new Error('连接失败，请启动应用后重试');
   }
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || `请求失败（${response.status}）`);

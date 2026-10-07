@@ -4,6 +4,8 @@
 
 ## 运行
 
+服务器地址在本目录的 `server.json` 中配置：`host` 是本机主机名，`pagePort` 是浏览器端口，`servicePort` 是本地服务端口。修改后重启应用；`host` 只能是 `127.0.0.1` 或 `localhost`，两个端口不能相同。macOS 在仓库根目录执行 `./run-macos.sh recitation-studio`。
+
 先确保 `runtime/.venv/Scripts/python.exe`、Node.js、npm 和已登录的 Codex CLI 可用。在本目录执行：
 
 ```powershell

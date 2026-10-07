@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from utils.scripts.timestamp import iso_timestamp
 from utils.scripts.workflow_checkpoint import WorkflowCheckpoint, create_run_directory
+from utils.scripts.app_server_config import load_server_config
 
 SAVE_TRANSITIONS = {
     "prepared": ("validating_revision", "failed"),
@@ -63,12 +64,10 @@ def read_project(path: Path) -> tuple[dict, bytes]:
 
 
 def fsync_directory(path: Path) -> None:
-    # Windows does not allow opening a directory this way; the file fsync and
-    # os.replace still provide the atomic native commit there.
-    try:
-        fd = os.open(str(path), os.O_RDONLY)
-    except OSError:
+    # Windows 使用文件 fsync 与原子替换提交；POSIX 追加目录 fsync。
+    if os.name == "nt":
         return
+    fd = os.open(str(path), os.O_RDONLY)
     try:
         os.fsync(fd)
     finally:
@@ -148,8 +147,8 @@ class WorkspaceService:
                 continue
             try:
                 project, data = read_project(project_file)
-            except (OSError, ValueError, json.JSONDecodeError):
-                continue
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                raise ValueError(f"项目文件读取失败：{project_file.parent.name}") from exc
             if project.get("projectId") == project_id:
                 return project, project_file, data
         raise FileNotFoundError("项目不存在")
@@ -163,8 +162,8 @@ class WorkspaceService:
                 project, data = read_project(project_file)
                 stat = project_file.stat()
                 result.append({"project": project, "fileSize": stat.st_size, "fileLastModified": int(stat.st_mtime_ns // 1_000_000), "hash": digest(data)})
-            except (OSError, ValueError, json.JSONDecodeError):
-                continue
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                raise ValueError(f"项目文件读取失败：{project_file.parent.name}") from exc
         return sorted(result, key=lambda item: (item["project"].get("createdAt", ""), item["project"].get("projectId", "")))
 
     def save_project(self, directory_name: str, requested: dict, operation_id: str | None = None) -> dict:
@@ -236,12 +235,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def allowed_origin(self) -> str | None:
         origin = self.headers.get("Origin")
-        expected = os.environ.get("BEITU_ALLOWED_ORIGIN", "http://127.0.0.1:5173")
+        expected = os.environ.get("BEITU_ALLOWED_ORIGIN", load_server_config(ROOT / "applications" / "image-recall-studio").page_url)
         return origin if origin == expected else None
 
     def allowed_request(self) -> bool:
         host = urlparse("http://" + self.headers.get("Host", "")).hostname
-        return host in ("127.0.0.1", "localhost") and (not self.headers.get("Origin") or self.allowed_origin() is not None)
+        return host == load_server_config(ROOT / "applications" / "image-recall-studio").host and (not self.headers.get("Origin") or self.allowed_origin() is not None)
 
     def log_message(self, format: str, *args: object) -> None:
         print(f"{iso_timestamp()} [workspace-service] {format % args}", flush=True)
@@ -320,10 +319,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    config = load_server_config(ROOT / "applications" / "image-recall-studio")
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", required=True)
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=5174)
+    parser.add_argument("--host", default=config.host)
+    parser.add_argument("--port", type=int, default=config.service_port)
     parser.add_argument("--log-dir", type=Path)
     parser.add_argument("--instance-id")
     args = parser.parse_args()

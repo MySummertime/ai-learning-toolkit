@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT))
 from utils.scripts.memory_span_project import next_span_color, normalize_text, source_hash, validate_project
 from utils.scripts.timestamp import filename_timestamp, iso_timestamp
 from utils.scripts.workflow_checkpoint import WorkflowCheckpoint, create_run_directory
+from utils.scripts.app_server_config import load_server_config
 
 SKILL = ROOT / ".agents" / "skills" / "mark-memory-spans" / "scripts" / "cli.py"
 AGENT_SCHEMA = ROOT / ".agents" / "skills" / "mark-memory-spans" / "references" / "agent-response.schema.json"
@@ -298,8 +299,8 @@ class Handler(BaseHTTPRequestHandler):
     def allowed_request(self) -> bool:
         host = urlparse("http://" + self.headers.get("Host", "")).hostname
         origin = self.headers.get("Origin")
-        expected = os.environ.get("BEISHU_ALLOWED_ORIGIN", "http://127.0.0.1:5175")
-        return host in ("127.0.0.1", "localhost") and (not origin or origin == expected)
+        expected = os.environ.get("BEISHU_ALLOWED_ORIGIN", load_server_config(ROOT / "applications" / "recitation-studio").page_url)
+        return host == load_server_config(ROOT / "applications" / "recitation-studio").host and (not origin or origin == expected)
 
     def log_message(self, format: str, *args: object) -> None:
         print(f"{iso_timestamp()} [recitation-studio] {format % args}", flush=True)
@@ -310,7 +311,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
         origin = self.headers.get("Origin", "")
-        if origin == os.environ.get("BEISHU_ALLOWED_ORIGIN", "http://127.0.0.1:5175"):
+        if origin == os.environ.get("BEISHU_ALLOWED_ORIGIN", load_server_config(ROOT / "applications" / "recitation-studio").page_url):
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
@@ -398,14 +399,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    config = load_server_config(ROOT / "applications" / "recitation-studio")
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", type=Path, default=ROOT / "outputs" / "recitation-studio")
-    parser.add_argument("--port", type=int, default=5176)
+    parser.add_argument("--host", default=config.host)
+    parser.add_argument("--port", type=int, default=config.service_port)
     parser.add_argument("--log-root", type=Path, default=ROOT / "logs" / "recitation-studio" / "runs")
     args = parser.parse_args()
     Handler.service = WorkspaceService(args.workspace, args.log_root)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(f"[recitation-studio] http://127.0.0.1:{args.port}", flush=True)
+    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    print(f"[recitation-studio] http://{args.host}:{args.port}", flush=True)
     server.serve_forever()
 
 

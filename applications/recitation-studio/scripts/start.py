@@ -15,6 +15,7 @@ from urllib.request import urlopen
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from utils.scripts.workflow_checkpoint import WorkflowCheckpoint, create_run_directory
+from utils.scripts.app_server_config import load_server_config
 
 APP = ROOT / "applications" / "recitation-studio"
 TRANSITIONS = {
@@ -31,18 +32,18 @@ TRANSITIONS = {
 }
 
 
-def check_port(port: int) -> None:
+def check_port(port: int, host: str) -> None:
     if not 1 <= port <= 65535:
         raise ValueError("端口超出范围")
     with socket.socket() as probe:
-        probe.bind(("127.0.0.1", port))
+        probe.bind((host, port))
 
 
-def existing_app_mode(port: int, service_port: int, workspace: Path) -> str | None:
+def existing_app_mode(port: int, service_port: int, workspace: Path, host: str) -> str | None:
     try:
-        with urlopen(f"http://127.0.0.1:{service_port}/health", timeout=1) as response:
+        with urlopen(f"http://{host}:{service_port}/health", timeout=1) as response:
             health = json.load(response)
-        with urlopen(f"http://127.0.0.1:{port}/", timeout=1) as response:
+        with urlopen(f"http://{host}:{port}/", timeout=1) as response:
             page = response.read(65536).decode("utf-8")
     except (OSError, ValueError, UnicodeError):
         return None
@@ -73,9 +74,10 @@ def stop(process: subprocess.Popen | None) -> None:
 
 
 def main() -> int:
+    config = load_server_config(APP)
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=5175)
-    parser.add_argument("--service-port", type=int, default=5176)
+    parser.add_argument("--port", type=int, default=config.page_port)
+    parser.add_argument("--service-port", type=int, default=config.service_port)
     parser.add_argument("--preview", action="store_true")
     args = parser.parse_args()
     run_dir = create_run_directory(ROOT / "logs" / "recitation-studio" / "runs")
@@ -89,21 +91,21 @@ def main() -> int:
         occupied = []
         for port in (args.port, args.service_port):
             try:
-                check_port(port)
+                check_port(port, config.host)
             except OSError as error:
                 if getattr(error, "winerror", None) != 10048:
                     raise
                 occupied.append(port)
         workspace = ROOT / "outputs" / "recitation-studio"
         if occupied:
-            existing_mode = existing_app_mode(args.port, args.service_port, workspace) if len(occupied) == 2 else None
+            existing_mode = existing_app_mode(args.port, args.service_port, workspace, config.host) if len(occupied) == 2 else None
             if existing_mode:
                 flow.move("attaching_existing")
                 flow.move("running")
                 mode_name = "预览" if existing_mode == "preview" else "开发"
-                print(f"recitation-studio已在运行（沿用现有{mode_name}模式实例）：http://127.0.0.1:{args.port}", flush=True)
+                print(f"recitation-studio已在运行（沿用现有{mode_name}模式实例）：http://{config.host}:{args.port}", flush=True)
                 print(f"运行日志：{run_dir}", flush=True)
-                while existing_app_mode(args.port, args.service_port, workspace):
+                while existing_app_mode(args.port, args.service_port, workspace, config.host):
                     time.sleep(1)
                 raise RuntimeError("已有recitation-studio实例已退出或健康检查失败")
             raise RuntimeError(f"端口 {', '.join(map(str, occupied))} 已被占用；请关闭占用进程，或用 -Port 和 -ServicePort 指定空闲端口")
@@ -112,13 +114,13 @@ def main() -> int:
             raise RuntimeError("未找到 npm 或 pnpm")
         pnpm = Path(npm).name.startswith("pnpm")
         workspace.mkdir(parents=True, exist_ok=True)
-        env = {**os.environ, "VITE_BEISHU_API_URL": f"http://127.0.0.1:{args.service_port}",
-               "BEISHU_ALLOWED_ORIGIN": f"http://127.0.0.1:{args.port}", "PYTHONUTF8": "1"}
+        env = {**os.environ, "VITE_BEISHU_API_URL": f"http://{config.host}:{args.service_port}",
+               "BEISHU_ALLOWED_ORIGIN": f"http://{config.host}:{args.port}", "PYTHONUTF8": "1"}
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         flow.move("starting_service")
         service_log = (run_dir / "service.log").open("w", encoding="utf-8")
         service = subprocess.Popen([sys.executable, "-B", "-u", str(APP / "scripts" / "workspace_service.py"),
-                                    "--workspace", str(workspace), "--port", str(args.service_port), "--log-root", str(run_dir)],
+                                    "--workspace", str(workspace), "--host", config.host, "--port", str(args.service_port), "--log-root", str(run_dir)],
                                    cwd=ROOT, env=env, stdout=service_log, stderr=subprocess.STDOUT, creationflags=flags)
         flow.move("verifying_service")
         deadline = time.monotonic() + 10
@@ -141,10 +143,10 @@ def main() -> int:
         subprocess.run([npm, "run", "build"], cwd=APP, env=env, check=True)
         flow.move("starting_gui")
         gui_log = (run_dir / "gui.log").open("w", encoding="utf-8")
-        command = [npm, "run", "preview" if args.preview else "dev", "--", "--port", str(args.port)]
+        command = [npm, "run", "preview" if args.preview else "dev", "--", "--host", config.host, "--port", str(args.port)]
         gui = subprocess.Popen(command, cwd=APP, env=env, stdout=gui_log, stderr=subprocess.STDOUT, creationflags=flags)
         flow.move("running")
-        print(f"recitation-studio：http://127.0.0.1:{args.port}", flush=True)
+        print(f"recitation-studio：http://{config.host}:{args.port}", flush=True)
         print(f"运行日志：{run_dir}", flush=True)
         while gui.poll() is None and service.poll() is None:
             time.sleep(.25)

@@ -83,7 +83,7 @@ export function nextSpanColor(spans: MemorySpan[]): string {
     const color = `#${[channel(0), channel(8), channel(4)].map(value => value.toString(16).padStart(2, '0')).join('')}`;
     if (!used.has(color)) return color;
   }
-  throw new Error('无法分配新的记忆要点颜色');
+  throw new Error('记忆要点颜色分配失败。');
 }
 
 export function paint(spans: MemorySpan[], indices: number[], action: 'add' | 'remove', text: string, targetId?: string): MemorySpan[] {
