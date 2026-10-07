@@ -69,38 +69,65 @@
         "success"
       ]
     },
-    "learning": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "unfamiliar": {
-          "type": "string",
-          "pattern": "^#[0-9A-Fa-f]{6}$"
-        },
-        "seen": {
-          "type": "string",
-          "pattern": "^#[0-9A-Fa-f]{6}$"
-        },
-        "familiar": {
-          "type": "string",
-          "pattern": "^#[0-9A-Fa-f]{6}$"
-        },
-        "outsideStage": {
-          "type": "string",
-          "pattern": "^#[0-9A-Fa-f]{6}$"
-        }
-      },
-      "required": [
-        "unfamiliar",
-        "seen",
-        "familiar",
-        "outsideStage"
-      ]
-    },
     "graph": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "nodes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "entry": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "candidate": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "outside": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            }
+          },
+          "required": [
+            "entry",
+            "candidate",
+            "outside"
+          ]
+        },
+        "browsing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "wordlistGroupSize": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "maxNodes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "focusNeighbors": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "expandedNeighbors": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          "required": [
+            "wordlistGroupSize",
+            "maxNodes",
+            "focusNeighbors",
+            "expandedNeighbors"
+          ]
+        },
         "initializeOnEnter": {
           "type": "boolean"
         },
@@ -182,6 +209,8 @@
         }
       },
       "required": [
+        "nodes",
+        "browsing",
         "initializeOnEnter",
         "family",
         "relations",
@@ -192,6 +221,18 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "primaryAction": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "primaryActionHover": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "primaryActionPressed": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
         "activeText": {
           "type": "string",
           "pattern": "^#[0-9A-Fa-f]{6}$"
@@ -210,6 +251,9 @@
         }
       },
       "required": [
+        "primaryAction",
+        "primaryActionHover",
+        "primaryActionPressed",
         "activeText",
         "inactiveText",
         "focus",
@@ -229,6 +273,32 @@
         "star"
       ]
     },
+    "wordlists": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "directory": {
+          "type": "string",
+          "minLength": 1
+        },
+        "formats": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "txt",
+              "json",
+              "jsonl"
+            ]
+          }
+        }
+      },
+      "required": [
+        "directory",
+        "formats"
+      ]
+    },
     "study": {
       "type": "object",
       "additionalProperties": false,
@@ -237,6 +307,16 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100
+        },
+        "pageSizeOptions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
         }
       },
       "required": [
@@ -247,10 +327,10 @@
   "required": [
     "schemaVersion",
     "ui",
-    "learning",
     "graph",
     "controls",
     "favorites",
+    "wordlists",
     "study"
   ]
 }

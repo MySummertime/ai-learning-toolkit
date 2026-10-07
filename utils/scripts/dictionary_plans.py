@@ -54,7 +54,32 @@ def visible_order(plan: dict[str, Any], round_: dict[str, Any], day: str, page_s
     schedule = plan["schedule"]["days"]
     if offset < 0 or offset >= len(schedule):
         return []
-    words = [plan["wordIds"][number - 1] for number in schedule[offset]["item_ids"]]
+    day_plan = schedule[offset]
+    words = [plan["wordIds"][number - 1] for number in day_plan["item_ids"]]
+    if plan["method"] == "ebbinghaus":
+        # Keep spaced-repetition cohorts visible in the order they are due,
+        # alternating each due review batch with today's new batch.
+        batches = {batch["batch_id"]: batch["item_ids"] for batch in plan["schedule"].get("batches", [])}
+        cohorts: list[list[str]] = []
+        for batch_id in day_plan.get("review_batch_ids", []):
+            cohort = [plan["wordIds"][number - 1] for number in batches.get(batch_id, [])]
+            if cohort:
+                cohorts.append(cohort)
+        for batch_id in day_plan.get("new_batch_ids", []):
+            cohort = [plan["wordIds"][number - 1] for number in batches.get(batch_id, [])]
+            if cohort:
+                cohorts.append(cohort)
+        if cohorts:
+            seed = int(hashlib.sha256(f'{plan["planId"]}:{round_["number"]}:{day}:cohorts'.encode()).hexdigest()[:16], 16)
+            rng = random.Random(seed)
+            for cohort in cohorts:
+                rng.shuffle(cohort)
+            ordered: list[str] = []
+            while any(cohorts):
+                for cohort in cohorts:
+                    if cohort:
+                        ordered.append(cohort.pop())
+            return ordered
     if not round_["shuffle"]["enabled"]:
         return words
     seed = int(hashlib.sha256(f'{plan["planId"]}:{round_["number"]}:{day}'.encode()).hexdigest()[:16], 16)
@@ -204,7 +229,7 @@ class PlanStore:
                             raise ValueError("乱序按钮状态必须为布尔值")
                         shuffle[key] = request[key]
             elif action == "nextRound":
-                if not round_complete(plan, round_, page_size=self.dictionary.config["study"]["wordsPerPage"]):
+                if not round_complete(plan, round_, page_size=self.dictionary.study_page_size()):
                     raise ValueError("当前轮尚未完成")
                 start = day_at(round_["reviewEndDate"], 1)
                 first_pass_days = len(plan["schedule"]["batches"])

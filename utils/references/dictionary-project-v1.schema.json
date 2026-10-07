@@ -23,6 +23,16 @@
       "minLength": 1,
       "maxLength": 100
     },
+    "origin": {
+      "enum": [
+        "builtin",
+        "user"
+      ]
+    },
+    "sourceFile": {
+      "type": "string",
+      "minLength": 1
+    },
     "words": {
       "type": "array",
       "uniqueItems": true,

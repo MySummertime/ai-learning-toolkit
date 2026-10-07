@@ -36,9 +36,6 @@ def base_state(extra: dict[str, Any]) -> dict[str, Any]:
 
 
 SCHEMAS: dict[str, dict[str, Any]] = {
-    "dictionary-learning-v1.schema.json": base_state({
-        "words": {"type": "object", "patternProperties": {WORD_ID: {
-            "enum": ["unfamiliar", "seen", "familiar"]}}, "additionalProperties": False}}),
     "dictionary-favorites-v1.schema.json": base_state({
         "words": {"type": "object", "patternProperties": {WORD_ID: obj({
             "favoritedAt": STAMP, "lastOpenedAt": STAMP})}, "additionalProperties": False}}),
@@ -47,14 +44,15 @@ SCHEMAS: dict[str, dict[str, Any]] = {
         "activeStageId": {"type": "string", "minLength": 1},
         "tabs": {"type": "array", "items": obj({
             "tabId": {"type": "string", "minLength": 1},
-            "kind": {"enum": ["graph", "word", "favorites", "settings", "candidate"]},
+            "kind": {"enum": ["graph", "word", "favorites", "candidate"]},
             "wordId": {"type": ["string", "null"]},
             "lemma": {"type": ["string", "null"]},
             "pinned": {"type": "boolean"}})},
         "activeTabId": {"type": "string", "minLength": 1},
         "study": obj({"openPlanIds": {"type": "array", "uniqueItems": True,
                                        "items": {"type": "string", "pattern": "^plan_[0-9a-f]{32}$"}},
-                      "activeTabId": {"type": "string", "minLength": 1}}),
+                      "activeTabId": {"type": "string", "minLength": 1},
+                      "pageSize": {"type": "integer", "minimum": 1, "maximum": 100}}, ["openPlanIds", "activeTabId"]),
         "split": obj({"enabled": {"type": "boolean"},
                       "leftWidthPercent": {"type": "number", "minimum": 25, "maximum": 75}}),
         "graph": obj({
@@ -75,18 +73,23 @@ SCHEMAS: dict[str, dict[str, Any]] = {
                 "additionalProperties": False},
             "relationshipIds": {"type": "array", "uniqueItems": True, "items": {"type": "string", "minLength": 1}}
         })}, "additionalProperties": False}}),
-    "dictionary-project-v1.schema.json": base_state({
+    "dictionary-project-v1.schema.json": {"$schema": "https://json-schema.org/draft/2020-12/schema", **obj({
+        "schemaVersion": {"const": VERSION},
+        "revision": {"type": "integer", "minimum": 1},
+        "updatedAt": STAMP,
         "projectId": {"type": "string", "pattern": "^[a-z0-9_-]+$"},
         "name": {"type": "string", "minLength": 1, "maxLength": 100},
+        "origin": {"enum": ["builtin", "user"]},
+        "sourceFile": {"type": "string", "minLength": 1},
         "words": {"type": "array", "uniqueItems": True, "items": obj({
             "wordId": {"type": "string", "pattern": WORD_ID},
-            "lemma": {"type": "string", "minLength": 1, "maxLength": 100}})}}),
+            "lemma": {"type": "string", "minLength": 1, "maxLength": 100}})}},
+        ["schemaVersion", "revision", "updatedAt", "projectId", "name", "words"])},
     "dictionary-config-v1.schema.json": {"$schema": "https://json-schema.org/draft/2020-12/schema", **obj({
         "schemaVersion": {"const": VERSION},
         "ui": obj({k: COLOR for k in ("background", "surface", "surfaceRaised", "text", "mutedText",
                                         "border", "hover", "selected", "disabled", "error", "success")}),
-        "learning": obj({k: COLOR for k in ("unfamiliar", "seen", "familiar", "outsideStage")}),
-        "graph": obj({"initializeOnEnter": {"type": "boolean"}, "family": COLOR, "relations": obj({k: COLOR for k in
+        "graph": obj({"nodes": obj({key: COLOR for key in ("entry", "candidate", "outside")}), "browsing": obj({key: {"type": "integer", "minimum": 1, "maximum": 200} for key in ("wordlistGroupSize", "maxNodes", "focusNeighbors", "expandedNeighbors")}), "initializeOnEnter": {"type": "boolean"}, "family": COLOR, "relations": obj({k: COLOR for k in
                           ("synonym", "near_synonym", "antonym", "spelling_similar")}),
                        "physics": obj({"springStrength": {"type": "number", "minimum": 0, "maximum": 1},
                                       "repulsionStrength": {"type": "number", "minimum": 0, "maximum": 5000},
@@ -94,29 +97,15 @@ SCHEMAS: dict[str, dict[str, Any]] = {
                                       "damping": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
                                       "restLength": {"type": "number", "minimum": 30, "maximum": 500},
                                       "familyNodeGap": {"type": "number", "minimum": 0, "maximum": 64}})}),
-        "controls": obj({k: COLOR for k in ("activeText", "inactiveText", "focus", "sliderTrack")}),
+        "controls": obj({k: COLOR for k in ("primaryAction", "primaryActionHover", "primaryActionPressed", "activeText", "inactiveText", "focus", "sliderTrack")}),
         "favorites": obj({"star": COLOR}),
-        "study": obj({"wordsPerPage": {"type": "integer", "minimum": 1, "maximum": 100}})})},
+        "wordlists": obj({"directory": {"type": "string", "minLength": 1}, "formats": {"type": "array", "minItems": 1, "uniqueItems": True, "items": {"enum": ["txt", "json", "jsonl"]}}}),
+        "study": obj({"wordsPerPage": {"type": "integer", "minimum": 1, "maximum": 100},
+                      "pageSizeOptions": {"type": "array", "minItems": 1, "uniqueItems": True, "items": {"type": "integer", "minimum": 1, "maximum": 100}}}, ["wordsPerPage"])})},
 }
 
-DEFAULT_CONFIG = {
-    "schemaVersion": VERSION,
-    "ui": {"background": "#F4F1E9", "surface": "#FFFEFA", "surfaceRaised": "#EAE6DA",
-           "text": "#20302C", "mutedText": "#61706B", "border": "#D4D8CE",
-           "hover": "#E5EEE6", "selected": "#D7EAD9", "disabled": "#A8B0A8",
-           "error": "#B43E3E", "success": "#22744D"},
-    "learning": {"unfamiliar": "#F5D7D4", "seen": "#D7E9F5", "familiar": "#D8EEDB",
-                 "outsideStage": "#D9DDDB"},
-    "graph": {"initializeOnEnter": True, "family": "#8B5CF6", "relations": {"synonym": "#16A34A",
-                "near_synonym": "#0EA5E9", "antonym": "#EF4444", "spelling_similar": "#F59E0B"},
-               "physics": {"springStrength": 0.08, "repulsionStrength": 900,
-                           "familyNonMemberRepulsionStrength": 1200,
-                          "damping": 0.82, "restLength": 150, "familyNodeGap": 8}},
-    "controls": {"activeText": "#173A2B", "inactiveText": "#68746E", "focus": "#1B6C53",
-                 "sliderTrack": "#A9BEB1"},
-    "favorites": {"star": "#F2B524"},
-    "study": {"wordsPerPage": 10},
-}
+# 颜色及默认参数只在应用配置文件中维护。
+DEFAULT_CONFIG = yaml.safe_load((Path(__file__).resolve().parents[2] / "applications" / "vocabulary-atlas" / "config.yaml").read_text(encoding="utf-8"))
 
 
 def validate(kind: str, value: Any) -> None:
@@ -134,7 +123,7 @@ def validate(kind: str, value: Any) -> None:
 
 def default_state(kind: str, now: str) -> dict[str, Any]:
     common = {"schemaVersion": VERSION, "revision": 1, "updatedAt": now}
-    if kind in ("learning", "favorites"):
+    if kind == "favorites":
         return {**common, "words": {}}
     if kind == "ui":
         return {**common, "activeProjectId": "default", "activeStageId": "all", "tabs": [
@@ -142,7 +131,7 @@ def default_state(kind: str, now: str) -> dict[str, Any]:
             "activeTabId": "graph", "study": {"openPlanIds": [], "activeTabId": "home"},
             "split": {"enabled": True, "leftWidthPercent": 52},
             "graph": {"zoomPercent": 100, "positions": {}, "visibleRelations": {
-                key: True for key in ("family", "synonym", "near_synonym", "antonym", "spelling_similar")}}}
+                key: key == "family" for key in ("family", "synonym", "near_synonym", "antonym", "spelling_similar")}}}
     raise ValueError(kind)
 
 
@@ -155,9 +144,12 @@ def default_stage(stage_id: str, label: str, now: str) -> dict[str, Any]:
     return value
 
 
-def default_project(project_id: str, name: str, words: list[dict[str, str]], now: str) -> dict[str, Any]:
+def default_project(project_id: str, name: str, words: list[dict[str, str]], now: str,
+                   origin: str = "user", source_file: str | None = None) -> dict[str, Any]:
     value = {"schemaVersion": VERSION, "revision": 1, "updatedAt": now,
-             "projectId": project_id, "name": name, "words": words}
+             "projectId": project_id, "name": name, "origin": origin, "words": words}
+    if source_file:
+        value["sourceFile"] = source_file
     validate("dictionary-project-v1.schema.json", value)
     return value
 
@@ -177,7 +169,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=["generate", "template"])
     parser.add_argument("--root", type=Path, default=Path.cwd())
-    parser.add_argument("--kind", choices=["learning", "favorites", "ui", "stage", "project"])
+    parser.add_argument("--kind", choices=["favorites", "ui", "stage", "project"])
     parser.add_argument("--stage-id")
     parser.add_argument("--project-id")
     parser.add_argument("--label")

@@ -65,7 +65,7 @@ def project_graph(entries: dict[str, dict], summaries: dict[str, dict], *,
                   normalize: Callable[[str], str], selected: str | None,
                   visible: dict[str, bool], show_others: bool, search: str,
                   limit: int, show_outside: bool, stage: dict | None,
-                  project_words: list[dict] | None = None, spelling_index: dict | None = None) -> dict[str, Any]:
+                  project_words: list[dict] | None = None, spelling_index: dict | None = None, focus_neighbors: int = 12, expanded_neighbors: int = 30) -> dict[str, Any]:
     project_ids = {row["wordId"] for row in project_words} if project_words is not None else set(entries)
     spelling_index = spelling_index or {"vocabulary": {}, "pairs": []}
     if selected and selected not in entries and selected not in project_ids and selected not in spelling_index["vocabulary"] and selected not in candidate_node_ids(entries, normalize):
@@ -73,12 +73,30 @@ def project_graph(entries: dict[str, dict], summaries: dict[str, dict], *,
 
     overview = project_words is not None and selected is None
     if overview:
+        source_entries = {wid: entry for wid, entry in entries.items() if wid in project_ids}
+        related_ids = set(project_ids)
+        by_name = {normalize(entry["lemma"]): wid for wid, entry in entries.items()}
+        for entry in source_entries.values():
+            for relation in entry.get("relationships", []) + entry.get("pendingRelations", []):
+                kind = relation.get("type") or relation.get("proposedType")
+                if visible.get("near_synonym" if kind == "synonym_or_near_synonym" else kind):
+                    target = relation.get("targetWordId") or by_name.get(normalize(relation.get("targetLemma", "")))
+                    if target: related_ids.add(target)
+            if visible.get("family"):
+                related_ids.update(wid for wid, other in entries.items() if other["familyId"] == entry["familyId"])
+                for form in entry.get("inflections", []):
+                    target = by_name.get(normalize(form["form"]["text"]))
+                    if target: related_ids.add(target)
+                for derivative in entry.get("derivatives", []):
+                    target = derivative.get("targetWordId") or by_name.get(normalize(derivative["word"]))
+                    if target: related_ids.add(target)
+        summaries = {wid: summary for wid, summary in summaries.items() if wid in related_ids}
         entries = {wid: entry for wid, entry in entries.items() if wid in project_ids}
-        summaries = {wid: summary for wid, summary in summaries.items() if wid in project_ids}
 
     nodes = {wid: {**summary, "kind": "entry", "status": "linked", "nodeId": wid}
              for wid, summary in summaries.items()}
     by_lemma = {normalize(entry["lemma"]): wid for wid, entry in entries.items()}
+    by_lemma.update({normalize(summary["lemma"]): wid for wid, summary in summaries.items()})
     for row in project_words or []:
         if row["wordId"] not in nodes:
             nodes[row["wordId"]] = {"nodeId": row["wordId"], "wordId": row["wordId"],
@@ -95,7 +113,7 @@ def project_graph(entries: dict[str, dict], summaries: dict[str, dict], *,
             "outsideStage": stage is not None and selected not in stage["words"],
             "kind": "relation_candidate", "status": "pending_collection"}
     parent: dict[str, str] = {wid: wid for wid in entries}
-    family_nodes: set[str] = set(entries)
+    family_nodes: set[str] = set(nodes)
     edges: dict[tuple[str, str, str, str], dict] = {}
 
     def find(node_id: str) -> str:
@@ -142,8 +160,9 @@ def project_graph(entries: dict[str, dict], summaries: dict[str, dict], *,
                                      "sourceSenseId": source_sense, "targetSenseId": target_sense}]}
 
     families_by_id: dict[str, list[str]] = defaultdict(list)
+    for wid, summary in summaries.items():
+        families_by_id[summary["familyId"]].append(wid)
     for wid, entry in entries.items():
-        families_by_id[entry["familyId"]].append(wid)
         for form in entry.get("inflections", []):
             lemma = form["form"]["text"]
             target = target_node(lemma, "inflection",
@@ -185,7 +204,7 @@ def project_graph(entries: dict[str, dict], summaries: dict[str, dict], *,
             target = relation.get("targetWordId")
             if not target:
                 lemma = relation.get("targetLemma", "")
-                if not lemma or (overview and normalize(lemma) not in by_lemma):
+                if not lemma:
                     continue
                 target = target_node(lemma, "relation_candidate", "pending" if "candidateId" in relation else "confirmed_unbuilt", wid)
             if target not in nodes or (stage is not None and not show_outside and nodes[target]["outsideStage"]):
@@ -201,11 +220,24 @@ def project_graph(entries: dict[str, dict], summaries: dict[str, dict], *,
         family_id = min((entries[wid]["familyId"] for wid in members if wid in entries), default=min(members))
         for node_id in members:
             nodes[node_id]["familyId"] = family_id
+    # 词族内没有直接词形/派生边的词，也应通过连线展示已有词族归属。
+    if visible.get("family"):
+        connected = {frozenset((edge["source"], edge["target"])) for edge in edges.values() if edge["type"] == "family"}
+        for members in all_families.values():
+            ordered_members = sorted(members, key=lambda wid: (wid not in entries, wid))
+            if len(ordered_members) < 2:
+                continue
+            anchor = ordered_members[0]
+            for member in ordered_members[1:]:
+                pair = frozenset((anchor, member))
+                if pair not in connected:
+                    add_edge(anchor, member, "family", "family:" + nodes[anchor]["familyId"] + ":" + member, "confirmed")
+                    connected.add(pair)
     # The global index also projects mathematically confirmed pairs with unbuilt ends.
     if visible.get("spelling_similar"):
         for pair in spelling_index["pairs"]:
             a, b = pair["leftId"], pair["rightId"]
-            if overview and not {a, b}.issubset(nodes):
+            if overview and not ({a, b} & project_ids):
                 continue
             if selected and selected not in (a, b):
                 continue
@@ -243,22 +275,23 @@ def project_graph(entries: dict[str, dict], summaries: dict[str, dict], *,
                     break
         return picked, len(candidates - picked)
 
-    if selected and not show_others:
+    if selected:
         chosen = {selected}
-        if visible.get("family"):
-            chosen.update(all_families.get(find(selected), []))
-        picked, deferred_count = neighboring(selected, 12)
+        maximum = expanded_neighbors if show_others else focus_neighbors
+        family_members = sorted((node_id for node_id in all_families.get(find(selected), []) if node_id != selected),
+                                key=lambda node_id: normalize(nodes[node_id]["lemma"])) if visible.get("family") else []
+        chosen.update(family_members[:maximum])
+        picked, deferred_count = neighboring(selected, maximum)
         chosen.update(picked)
+        deferred_count += max(0, len(family_members) - maximum)
     elif project_words is not None:
         deferred_count = 0
         chosen = set(project_ids)
         if visible.get("family") and not selected:
             chosen.update(family_nodes)
-        if selected:
-            if visible.get("family"):
-                chosen.update(all_families.get(find(selected), []))
-            picked, deferred_count = neighboring(selected, 500)
-            chosen.update(picked)
+        for edge in edges.values():
+            if visible.get(edge["type"]) and ({edge["source"], edge["target"]} & project_ids):
+                chosen.update((edge["source"], edge["target"]))
     else:
         deferred_count = 0
         chosen = set(family_nodes) if visible.get("family") else set()
@@ -282,17 +315,19 @@ def project_graph(entries: dict[str, dict], summaries: dict[str, dict], *,
         term = normalize(search)
         if project_words is None:
             chosen.update(node_id for node_id, node in nodes.items() if term in normalize(node["lemma"]))
-        elif not selected:
-            chosen = {node_id for node_id in chosen if term in normalize(nodes[node_id]["lemma"])}
     if stage is not None and not show_outside:
         chosen = {node_id for node_id in chosen if not nodes[node_id]["outsideStage"] or node_id == selected}
+    connected = {node_id for edge in edges.values() if visible.get(edge["type"])
+                 for node_id in (edge["source"], edge["target"])}
     ordered = sorted(chosen, key=lambda node_id: (node_id != selected,
                      bool(search) and normalize(search) not in normalize(nodes[node_id]["lemma"]),
+                     overview and node_id not in project_ids,
+                     node_id not in connected,
                      nodes[node_id]["kind"] != "entry",
                      normalize(nodes[node_id]["lemma"])))
-    shown = set(ordered[:max(1, min(500, limit))])
+    shown = set(ordered[:max(1, limit)])
     rendered_edges = [edge for edge in edges.values() if edge["source"] in shown and edge["target"] in shown and
-                      edge["type"] != "family"]
+                      (edge["type"] != "family" or visible.get("family"))]
     unique_spelling = set()
     filtered_edges = []
     for edge in rendered_edges:
@@ -307,6 +342,6 @@ def project_graph(entries: dict[str, dict], summaries: dict[str, dict], *,
                 for members in all_families.values() if set(members) & shown] if visible.get("family") else []
     return {"nodes": [nodes[node_id] for node_id in ordered if node_id in shown],
             "edges": rendered_edges, "families": families,
-            "entryCount": sum(node_id in entries for node_id in shown),
-            "placeholderCount": sum(node_id not in entries for node_id in shown),
+            "entryCount": sum(nodes[node_id]["kind"] == "entry" for node_id in shown),
+            "placeholderCount": sum(nodes[node_id]["kind"] != "entry" for node_id in shown),
             "hiddenCount": len(ordered) - len(shown) + deferred_count, "selected": selected}

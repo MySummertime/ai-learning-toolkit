@@ -29,7 +29,7 @@ from utils.scripts.timestamp import iso_timestamp
 
 RELATION_TYPES = ("family", "synonym", "near_synonym", "antonym", "spelling_similar")
 SEMANTIC_TYPES = {"synonym", "near_synonym", "antonym"}
-STATE_NAMES = {"learning": "learning-state.json", "favorites": "favorites-state.json", "ui": "ui-state.json"}
+STATE_NAMES = {"favorites": "favorites-state.json", "ui": "ui-state.json"}
 
 
 class ConflictError(ValueError):
@@ -40,13 +40,10 @@ def normalize_lemma(word: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", word).strip().split()).casefold()
 
 
-def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def word_id(lemma: str) -> str:
     normalized = normalize_lemma(lemma)
-    if not normalized or len(normalized) > 100 or not re.fullmatch(r"[a-z][a-z '\-]*", normalized):
+    latin = "".join(char for char in unicodedata.normalize("NFKD", normalized) if not unicodedata.combining(char))
+    if not normalized or len(normalized) > 100 or not re.fullmatch(r"[a-z][a-z . '\-]*", latin):
         raise ValueError(f"无效英文单词：{lemma}")
     return "w_" + hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:20]
 
@@ -67,33 +64,19 @@ class DictionaryStore:
         self._entries_signature: tuple[tuple[str, int, int], ...] | None = None
         self._search_index: dict[str, dict[str, Any]] | None = None
         self._search_signature: tuple[tuple[str, int, int], ...] | None = None
+        self.reload_config()
+
+    def reload_config(self) -> None:
+        """Refresh maintainer-owned app config so UI token edits need no API restart."""
         config_path = self.root / "applications" / "vocabulary-atlas" / "config.yaml"
         self.config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         self.config["graph"]["physics"].setdefault("familyNodeGap", DEFAULT_CONFIG["graph"]["physics"]["familyNodeGap"])
+        for key in ("primaryAction", "primaryActionHover", "primaryActionPressed"):
+            self.config["controls"].setdefault(key, DEFAULT_CONFIG["controls"][key])
         validate("dictionary-config-v1.schema.json", self.config)
 
-    def config_snapshot(self) -> dict[str, Any]:
-        path = self.root / "applications" / "vocabulary-atlas" / "config.yaml"
-        with self.lock:
-            raw = path.read_bytes()
-            current = yaml.safe_load(raw.decode("utf-8"))
-            current["graph"]["physics"].setdefault("familyNodeGap", DEFAULT_CONFIG["graph"]["physics"]["familyNodeGap"])
-            validate("dictionary-config-v1.schema.json", current)
-            self.config = current
-            return {"config": copy.deepcopy(current), "revision": hashlib.sha256(raw).hexdigest()}
-
-    def save_config(self, value: dict[str, Any], expected_revision: str) -> dict[str, Any]:
-        path = self.root / "applications" / "vocabulary-atlas" / "config.yaml"
-        try:
-            validate("dictionary-config-v1.schema.json", value)
-        except Exception as exc:
-            raise ValueError(f"配置无效：{exc.message if hasattr(exc, 'message') else exc}") from exc
-        with self.lock, project_lock(self.root / "logs" / "vocabulary-atlas" / "store.lock", "dictionary:config"):
-            if sha256(path) != expected_revision:
-                raise ConflictError("配置版本冲突，请重新加载设置")
-            write_text_atomic(path, yaml.safe_dump(value, allow_unicode=True, sort_keys=False))
-            self.config = copy.deepcopy(value)
-            return self.config_snapshot()
+    def study_page_size(self) -> int:
+        return self.state("ui")["study"].get("pageSize", self.config["study"]["wordsPerPage"])
 
     def migrate_entries(self) -> dict[str, int]:
         """Copy verified legacy entries; never overwrite either location."""
@@ -169,7 +152,8 @@ class DictionaryStore:
             name = "默认项目"
         unique = list(dict.fromkeys(normalize_lemma(lemma) for lemma in lemmas))
         return default_project("default", name,
-                               [{"wordId": word_id(lemma), "lemma": lemma} for lemma in unique], iso_timestamp())
+                               [{"wordId": word_id(lemma), "lemma": lemma} for lemma in unique], iso_timestamp(),
+                               origin="builtin")
 
     def project(self, project_id: str) -> dict[str, Any]:
         path = self._project_path(project_id)
@@ -190,7 +174,23 @@ class DictionaryStore:
     def projects(self) -> list[dict[str, Any]]:
         if not any(self.projects_dir.glob("*/project.json")):
             self.project("default")
-        return [self.project(path.parent.name) for path in sorted(self.projects_dir.glob("*/project.json"))]
+        paths = sorted(self.projects_dir.glob("*/project.json"))
+        result = [self.project(path.parent.name) for path in paths]
+        legacy = [(path, project) for path, project in zip(paths, result) if "origin" not in project]
+        if legacy:
+            from utils.scripts.dictionary_wordlists import wordlist_files, prepare_wordlist, wordlist_name
+            builtin = [(file.relative_to(self.root).as_posix(), wordlist_name(file), set(prepare_wordlist(file)[0]))
+                       for file in wordlist_files(self.root, self.config)]
+            for path, project in legacy:
+                words = {row["lemma"] for row in project["words"]}
+                match = next(((source_file, name) for source_file, name, lemmas in builtin
+                              if project["name"] == name and words == lemmas), None)
+                project["origin"] = "builtin" if project["projectId"] == "default" or match else "user"
+                if match:
+                    project["sourceFile"] = match[0]
+                write_text_atomic(path, json.dumps(project, ensure_ascii=False, indent=2) + "\n")
+            result = [self.project(path.parent.name) for path in paths]
+        return result
 
     @staticmethod
     def project_words(raw: str) -> list[dict[str, str]]:
@@ -241,10 +241,10 @@ class DictionaryStore:
                 raise ValueError("至少保留一个项目")
             directory = self._project_path(project_id).parent
             self._project_path(project_id).unlink()
-            (directory / "learning-state.json").unlink(missing_ok=True)
             directory.rmdir()
 
-    def create_project(self, name: str, raw: str = "", kind: str = "text") -> dict[str, Any]:
+    def create_project(self, name: str, raw: str = "", kind: str = "text", *,
+                       origin: str = "user", source_file: str | None = None) -> dict[str, Any]:
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 100:
             raise ValueError("项目名称无效")
         if kind == "jsonl":
@@ -275,7 +275,8 @@ class DictionaryStore:
             raise ConflictError("拼写关系正在更新，请完成后重试")
         unique = list(dict.fromkeys(lemmas))
         value = default_project(uuid.uuid4().hex, name.strip(),
-                                [{"wordId": word_id(lemma), "lemma": lemma} for lemma in unique], iso_timestamp())
+                                [{"wordId": word_id(lemma), "lemma": lemma} for lemma in unique], iso_timestamp(),
+                                origin=origin, source_file=source_file)
         validate("dictionary-project-v1.schema.json", value)
         with self.lock, project_lock(self.root / "logs" / "vocabulary-atlas" / "store.lock", "dictionary:projects"):
             write_text_atomic(self._project_path(value["projectId"]), json.dumps(value, ensure_ascii=False, indent=2) + "\n")
@@ -359,7 +360,7 @@ class DictionaryStore:
                 sense = senses[sense_id]
                 valid = {item["itemId"] for group in ("examples", "collocations", "phrases", "grammarTags", "registerTags")
                          for item in sense[group]}
-                valid.update((sense["definitionZh"]["itemId"], sense["definitionEn"]["itemId"]))
+                valid.update(sense[key]["itemId"] for key in ("definitionZh", "definitionEn") if key in sense)
                 if any(item_id not in valid for item_id in content_ids):
                     raise ValueError(f"阶段内容引用悬空：{sense_id}")
             relationships = {r["relationshipId"]: r for r in entries[word_id]["relationships"]}
@@ -370,7 +371,7 @@ class DictionaryStore:
         return value
 
     def stages(self) -> list[dict[str, Any]]:
-        result = [{"stageId": "all", "label": "所有单词（测试）", "revision": 0}]
+        result = [{"stageId": "all", "label": "所有单词", "revision": 0}]
         for path in sorted((self.data / "stages").glob("*.json")):
             value = self.stage(path.stem)
             if value:
@@ -379,7 +380,7 @@ class DictionaryStore:
 
     def add_to_stage(self, stage_id: str, word_id: str, expected_revision: int) -> dict[str, Any]:
         if stage_id == "all":
-            raise ValueError("测试阶段无需加入单词")
+            raise ValueError("所有单词范围会自动包含词库，无需手动添加")
         with self.lock, project_lock(self.root / "logs" / "vocabulary-atlas" / "store.lock", f"dictionary:stage:{stage_id}"):
             stage = self.stage(stage_id)
             if stage is None or stage["revision"] != expected_revision:
@@ -410,21 +411,10 @@ class DictionaryStore:
             write_text_atomic(self.data / "stages" / f"{stage_id}.json", json.dumps(stage, ensure_ascii=False, indent=2) + "\n")
             return stage
 
-    def state(self, kind: str, project_id: str | None = None) -> dict[str, Any]:
+    def state(self, kind: str) -> dict[str, Any]:
         if kind not in STATE_NAMES:
             raise ValueError("无效状态类型")
-        if kind == "learning":
-            project_id = project_id or self.state("ui")["activeProjectId"]
-            self.project(project_id)
-            path = self.projects_dir / project_id / "learning-state.json"
-            if project_id == "default" and not path.exists():
-                legacy = self.data / STATE_NAMES["learning"]
-                if legacy.exists():
-                    value = json.loads(legacy.read_text(encoding="utf-8"))
-                    validate("dictionary-learning-v1.schema.json", value)
-                    write_text_atomic(path, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
-        else:
-            path = self.data / STATE_NAMES[kind]
+        path = self.data / STATE_NAMES[kind]
         if not path.exists():
             return default_state(kind, iso_timestamp())
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -433,6 +423,10 @@ class DictionaryStore:
         if kind == "ui" and "study" not in value:
             value["study"] = {"openPlanIds": [], "activeTabId": "home"}
         if kind == "ui":
+            # 读取界面状态时迁移旧设置标签。
+            value["tabs"] = [tab for tab in value["tabs"] if tab["kind"] != "settings"]
+            if not any(tab["tabId"] == value["activeTabId"] for tab in value["tabs"]):
+                value["activeTabId"] = "graph"
             previews = [tab for tab in value["tabs"] if tab["kind"] in ("word", "candidate") and not tab["pinned"]]
             keep = next((tab for tab in previews if tab["tabId"] == value["activeTabId"]), previews[-1] if previews else None)
             value["tabs"] = [tab for tab in value["tabs"] if tab["kind"] not in ("word", "candidate") or tab["pinned"] or tab is keep]
@@ -441,14 +435,11 @@ class DictionaryStore:
         validate(f"dictionary-{kind}-v1.schema.json", value)
         return value
 
-    def save_state(self, kind: str, value: dict[str, Any], expected_revision: int,
-                   project_id: str | None = None) -> dict[str, Any]:
+    def save_state(self, kind: str, value: dict[str, Any], expected_revision: int) -> dict[str, Any]:
         if kind not in STATE_NAMES:
             raise ValueError("无效状态类型")
-        if kind == "learning" and project_id is None:
-            project_id = self.state("ui")["activeProjectId"]
         with self.lock, project_lock(self.root / "logs" / "vocabulary-atlas" / "store.lock", f"dictionary:{kind}"):
-            current = self.state(kind, project_id)
+            current = self.state(kind)
             if current["revision"] != expected_revision:
                 raise ConflictError(f"状态版本冲突：当前 {current['revision']}，请求 {expected_revision}")
             result = copy.deepcopy(value)
@@ -456,15 +447,8 @@ class DictionaryStore:
                           updatedAt=iso_timestamp())
             validate(f"dictionary-{kind}-v1.schema.json", result)
             known = self.entries()
-            allowed_words = (known | {row["wordId"]: row for row in self.project(project_id)["words"]}
-                             if kind == "learning" else known)
-            if kind == "learning":
-                for path in (self.data / "plans").glob("plan_*.json"):
-                    plan = json.loads(path.read_text(encoding="utf-8"))
-                    if plan.get("projectId") == project_id:
-                        allowed_words.update({wid: None for wid in plan.get("wordIds", [])})
-            if kind in ("learning", "favorites") and any(wid not in allowed_words for wid in result["words"]):
-                raise ValueError("学习或收藏状态存在悬空 wordId")
+            if kind == "favorites" and any(wid not in known for wid in result["words"]):
+                raise ValueError("收藏状态存在悬空 wordId")
             if kind == "ui":
                 self.project(result["activeProjectId"])
                 self.stage(result["activeStageId"])
@@ -485,20 +469,9 @@ class DictionaryStore:
                 graph_ids.update(row["wordId"] for project in self.projects() for row in project["words"])
                 if any(wid not in graph_ids for wid in result["graph"]["positions"]):
                     raise ValueError("图谱位置引用悬空")
-            target = (self.projects_dir / project_id / "learning-state.json" if kind == "learning" and project_id
-                      else self.data / STATE_NAMES[kind])
+            target = self.data / STATE_NAMES[kind]
             write_text_atomic(target, json.dumps(result, ensure_ascii=False, indent=2) + "\n")
             return result
-
-    def patch_learning(self, word_id: str, level: str, revision: int, project_id: str | None = None) -> dict[str, Any]:
-        if level not in ("unfamiliar", "seen", "familiar"):
-            raise ValueError("无效熟悉度")
-        project_id = project_id or self.state("ui")["activeProjectId"]
-        if word_id not in {row["wordId"] for row in self.project(project_id)["words"]} and word_id not in self.entries():
-            raise ValueError("单词不属于项目或总词库")
-        state = self.state("learning", project_id)
-        state["words"][word_id] = level
-        return self.save_state("learning", state, revision, project_id)
 
     def patch_favorite(self, word_id: str, favorited: bool, revision: int) -> dict[str, Any]:
         self.entry(word_id)
@@ -520,9 +493,9 @@ class DictionaryStore:
 
     @staticmethod
     def selected_senses(entry: dict[str, Any], stage: dict[str, Any] | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        senses = [sense for sense in entry["senses"] if sense["definitionZh"]["verificationStatus"] != "rejected"]
+        senses = [sense for sense in entry["senses"] if (sense.get("definitionZh") or sense["definitionEn"])["verificationStatus"] != "rejected"]
         if stage is None:
-            verified = [sense for sense in senses if sense["definitionZh"]["verificationStatus"] not in ("pending", "rejected")]
+            verified = [sense for sense in senses if (sense.get("definitionZh") or sense["definitionEn"])["verificationStatus"] not in ("pending", "rejected")]
             core_id = (verified or senses)[0]["senseId"] if senses else None
             return ([s for s in senses if s["senseId"] == core_id],
                     [s for s in senses if s["senseId"] != core_id])
@@ -542,16 +515,16 @@ class DictionaryStore:
     def summary(self, entry: dict[str, Any], stage: dict[str, Any] | None) -> dict[str, Any]:
         core, more = self.selected_senses(entry, stage)
         return {"wordId": entry["wordId"], "lemma": entry["lemma"], "familyId": entry["familyId"],
-                "core": [{"senseId": s["senseId"], "text": s["definitionZh"]["text"],
+                "core": [{"senseId": s["senseId"], "text": entry["dictionaryGlossZh"]["text"] if "dictionaryGlossZh" in entry else (s.get("definitionZh") or s["definitionEn"])["text"],
                           "partOfSpeech": s["partOfSpeech"],
-                          "verificationStatus": s["definitionZh"]["verificationStatus"]} for s in core],
-                "more": [{"senseId": s["senseId"], "text": s["definitionZh"]["text"]} for s in more],
+                          "verificationStatus": (s.get("definitionZh") or s["definitionEn"])["verificationStatus"]} for s in core],
+                "more": [{"senseId": s["senseId"], "text": (s.get("definitionZh") or s["definitionEn"])["text"]} for s in more],
                 "senseIds": [s["senseId"] for s in core + more], "outsideStage": stage is not None and not (core or more)}
 
     def bootstrap(self) -> dict[str, Any]:
+        self.reload_config()
         ui = self.state("ui")
         return {"config": self.config, "stages": self.stages(), "projects": [],
-                "learning": self.state("learning", ui["activeProjectId"]),
                 "favorites": self.state("favorites"), "ui": ui,
                 "words": []}
 
@@ -608,7 +581,7 @@ class DictionaryStore:
                                          if sense["senseId"] == relation.get("sourceSenseId")), None)
                     hits.append({"sourceWordId": entry["wordId"], "sourceLemma": entry["lemma"],
                                  "sourceSenseId": relation.get("sourceSenseId"),
-                                 "sourceSenseText": source_sense["definitionZh"]["text"] if source_sense else None,
+                                 "sourceSenseText": (source_sense.get("definitionZh") or source_sense["definitionEn"])["text"] if source_sense else None,
                                  "type": relation.get("type", relation.get("proposedType")),
                                  "status": "待核验" if relation in entry.get("pendingRelations", []) else
                                            relation.get("verificationStatus", "待核验"),
@@ -635,17 +608,21 @@ class DictionaryStore:
     def graph(self, stage_id: str = "all", selected: str | None = None,
               visible: dict[str, bool] | None = None, show_others: bool = False,
               search: str = "", limit: int = 500, show_outside: bool = False,
-              project_id: str | None = None) -> dict[str, Any]:
+              project_id: str | None = None, offset: int = 0) -> dict[str, Any]:
         entries = self.entries()
         project = self.project(project_id or self.state("ui")["activeProjectId"])
         stage = self.stage(stage_id)
         visible = {key: bool((visible or {}).get(key, True)) for key in RELATION_TYPES}
-        overview_ids = {row["wordId"] for row in project["words"]} if selected is None else None
-        summaries = {wid: self.summary(entry, stage) for wid, entry in entries.items()
-                     if overview_ids is None or wid in overview_ids}
+        browsing = self.config["graph"]["browsing"]
+        rows = project["words"]
+        if selected is None:
+            rows = [row for row in rows if normalize_lemma(search) in normalize_lemma(row["lemma"])]
+            rows = rows[max(0, offset):max(0, offset) + browsing["wordlistGroupSize"]]
+        summaries = {wid: self.summary(entry, stage) for wid, entry in entries.items()}
         result = project_graph(entries, summaries, normalize=normalize_lemma, selected=selected,
                                visible=visible, show_others=show_others, search=search,
-                               limit=limit, show_outside=show_outside, stage=stage,
-                               project_words=project["words"], spelling_index=load_spelling_index(self.root))
+                               limit=min(limit, browsing["maxNodes"]), show_outside=show_outside, stage=stage,
+                               project_words=rows, spelling_index=load_spelling_index(self.root),
+                               focus_neighbors=browsing["focusNeighbors"], expanded_neighbors=browsing["expandedNeighbors"])
         self.graph_validator.validate(result)
         return result

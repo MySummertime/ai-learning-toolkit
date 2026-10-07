@@ -297,6 +297,24 @@ def sync(root: Path, full: bool = False) -> dict:
     return advance(root, start(root, full))
 
 
+def is_current(root: Path) -> bool:
+    parent = root / "logs" / NAME / "runs"
+    if not parent.is_dir():
+        return False
+    states = [read_json(path) for path in sorted(parent.glob("*/state.json"), reverse=True)]
+    if any(state["status"] != "completed" for state in states):
+        return False
+    completed = next((state for state in states if state["status"] == "completed"), None)
+    if not completed or completed.get("storageSignature") != storage_signature(root) or not index_path(root).is_file():
+        return False
+    index = load_index(root)
+    for path in (root / "outputs" / "vocabulary-atlas" / "projects").glob("*/project.json"):
+        for row in read_json(path)["words"]:
+            if word_id(row["lemma"]) not in index["vocabulary"]:
+                return False
+    return True
+
+
 _adjacency_source = None
 _adjacency = {}
 

@@ -16,6 +16,16 @@ NAME = "dictionary-migration"
 STAGES = ("prepared", "collecting", "validating", "committing", "verifying", "cleaning", "completed")
 
 
+def legacy_sources(root: Path) -> tuple[Path, Path]:
+    return (root / "outputs" / "英文词典" / "entries", root / "outputs" / "vocabulary-atlas" / "entries")
+
+
+def needs_migration(root: Path) -> bool:
+    return any(any(source.glob("*.json")) for source in legacy_sources(root)) or any(
+        read_json(path)["status"] != "completed"
+        for path in (root / "logs" / NAME / "runs").glob("*/state.json"))
+
+
 def migrate(root: Path, validate=None) -> dict:
     parent = root / "logs" / NAME / "runs"
     pending = [path for path in sorted(parent.glob("*/state.json"), reverse=True) if read_json(path)["status"] != "completed"]
@@ -32,7 +42,7 @@ def migrate(root: Path, validate=None) -> dict:
             "completed_steps": [], "pending_decisions": [], "error": None, "created_at": now, "updated_at": now,
             "last_heartbeat_at": now, "event_sequence": 0})
     directory = root / "outputs" / "vocabulary-atlas" / "dicts"
-    sources = (root / "outputs" / "英文词典" / "entries", root / "outputs" / "vocabulary-atlas" / "entries")
+    sources = legacy_sources(root)
     with flow.lock(), project_lock(root / "logs" / "build-word-entry" / "dictionary.lock", f"{NAME}:{run_id}"):
         state = flow.load()
         if state["status"] == "paused_retryable_error":
