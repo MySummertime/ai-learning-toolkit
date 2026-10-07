@@ -194,8 +194,19 @@ class DictionaryStore:
 
     @staticmethod
     def project_words(raw: str) -> list[dict[str, str]]:
-        unique = list(dict.fromkeys(normalize_lemma(line) for line in raw.splitlines() if line.strip()))
-        return [{"wordId": word_id(lemma), "lemma": lemma} for lemma in unique]
+        lemmas: list[str] = []
+        for number, line in enumerate(raw.splitlines(), 1):
+            normalized = normalize_lemma(line)
+            if not normalized:
+                continue
+            if normalized in lemmas:
+                continue
+            try:
+                word_id(normalized)
+            except ValueError as exc:
+                raise ValueError(f"第 {number} 行{str(exc)}") from exc
+            lemmas.append(normalized)
+        return [{"wordId": word_id(lemma), "lemma": lemma} for lemma in lemmas]
 
     def update_project(self, project_id: str, name: str, raw: str, revision: int) -> dict[str, Any]:
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 100:
@@ -254,6 +265,10 @@ class DictionaryStore:
                 raise ValueError(f"项目词表第 {number} 项缺少 word")
             normalized = normalize_lemma(lemma)
             bucket(normalized)
+            try:
+                word_id(normalized)
+            except ValueError as exc:
+                raise ValueError(f"第 {number} 行{str(exc)}") from exc
             lemmas.append(normalized)
         spelling_lock = self.root / "logs" / "dictionary-spelling" / "index.lock"
         if spelling_lock.exists() and not recover_stale_lock(spelling_lock):
