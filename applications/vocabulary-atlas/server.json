@@ -1,0 +1,5 @@
+{
+  "host": "127.0.0.1",
+  "pagePort": 9004,
+  "servicePort": 9005
+}

@@ -22,7 +22,7 @@ from utils.scripts.dictionary_store import DictionaryStore
 from utils.scripts.timestamp import iso_timestamp
 
 APP = Path(__file__).resolve().parents[1]
-PREVIEW = Path(__file__).resolve().parents[3] / "outputs" / "vocabulary-atlas" / "preview-word-page.png"
+PREVIEW = Path(__file__).resolve().parents[3] / "outputs" / "词汇图谱" / "preview-word-page.png"
 GRAPH_PREVIEW = PREVIEW.with_name("preview-graph.png")
 
 
@@ -73,9 +73,11 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         fixture(root)
+        config_path = root / "applications" / "vocabulary-atlas" / "config.yaml"
+        config_path.write_text(config_path.read_text().replace("pageSizeOptions: [", "pageSizeOptions: [1, "))
         store = DictionaryStore(root)
         store.migrate_entries()
-        stage_path = root / "outputs" / "vocabulary-atlas" / "stages" / "sample.json"
+        stage_path = root / "outputs" / "词汇图谱" / "stages" / "sample.json"
         stage_path.parent.mkdir(parents=True)
         stage_path.write_text(json.dumps({"schemaVersion": "1.0", "revision": 1,
             "updatedAt": iso_timestamp(), "stageId": "sample", "label": "测试阶段", "words": {}},
@@ -96,7 +98,8 @@ def main() -> None:
         try:
             wait_for(front_url + "/")
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(headless=True)
+                chrome = Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
+                browser = playwright.chromium.launch(headless=True, executable_path=str(chrome) if chrome.is_file() else None)
                 page = browser.new_page(viewport={"width": 1920, "height": 1080})
                 errors: list[str] = []
                 page.on("pageerror", lambda error: errors.append(str(error)))
@@ -116,19 +119,6 @@ def main() -> None:
                 assert page.locator('.graph-node[data-node-kind="inflection"]').count() > 0
                 assert_family_contacts(page)
                 assert page.get_by_role("slider", name="图谱缩放比例").input_value() == "100"
-                # Check live application, boundary values, and persisted geometry on reload.
-                for configured_gap in (0, 64, 12, 8):
-                    page.locator(".page-rail .rail-settings").click()
-                    page.get_by_label("同族节点间距", exact=False).fill(str(configured_gap))
-                    page.get_by_role("button", name="保存配置").click()
-                    page.get_by_role("status").get_by_text("配置已保存并应用").wait_for()
-                    assert store.config["graph"]["physics"]["familyNodeGap"] == configured_gap
-                    page.get_by_role("button", name="vocabulary-atlas", exact=True).click()
-                    assert_family_contacts(page, configured_gap)
-                    if configured_gap == 12:
-                        page.reload()
-                        page.locator(".graph-node").first.wait_for()
-                        assert_family_contacts(page, configured_gap)
                 summaries = store.word_summaries("all")
                 for summary in summaries:
                     if not summary["core"]:
@@ -203,13 +193,13 @@ def main() -> None:
                 assert project_name.input_value() == "界面重命名测试"
                 assert page.locator(".app-header").count() == 0
                 assert page.locator(".page-rail .rail-brand").count() == 1
-                page.get_by_role("button", name="项目页").click()
+                page.get_by_role("button", name="词表").click()
                 page.locator(".project-card").first.wait_for(timeout=10000)
                 assert page.locator(".project-card").count() == 1
-                page.get_by_role("button", name="词典页").click()
+                page.get_by_role("button", name="词典").click()
                 page.locator(".dictionary-search input").fill("pass")
                 page.locator(".dictionary-results button").first.wait_for(timeout=10000)
-                page.get_by_role("button", name="日历页").click()
+                page.get_by_role("button", name="日历").click()
                 page.locator(".calendar-month").first.wait_for(timeout=10000)
                 assert page.locator(".calendar-month").count() == 25
                 assert page.locator(".calendar-scroll").evaluate("grid => getComputedStyle(grid).gridTemplateColumns.split(' ').length") == 2
@@ -226,14 +216,14 @@ def main() -> None:
                 page.locator('.calendar-scroll button').first.click()
                 page.wait_for_timeout(300)
                 assert page.locator('.calendar-scroll').evaluate('box => box.scrollTop') == 0
-                page.get_by_role("button", name="词典页").click()
+                page.get_by_role("button", name="词典").click()
                 page.route('**/api/plans', lambda route: route.fulfill(status=503, json={'error': 'SYNTHETIC_PLAN_FAILURE'}))
-                page.get_by_role("button", name="日历页").click()
+                page.get_by_role("button", name="日历").click()
                 page.wait_for_function("document.querySelector('.calendar-scroll')?.scrollTop > 0")
                 page.locator('.study-calendar-details .error-note').wait_for()
                 assert page.locator('.study-calendar-details h2').text_content() == calendar_today
                 page.unroute('**/api/plans')
-                page.get_by_role("button", name="背单词页").click()
+                page.get_by_role("button", name="背单词").click()
                 page.get_by_role("button", name="新建背诵计划").click()
                 assert page.get_by_role("dialog", name="新建背诵计划").is_visible()
                 with urlopen(front_url + "/api/today") as response:
@@ -278,19 +268,19 @@ def main() -> None:
                 page.locator(".study-plan-controls input[type=checkbox]").check()
                 page.get_by_role("button", name="组间乱序").click()
                 assert page.get_by_role("button", name="组间乱序").get_attribute("aria-pressed") == "true"
-                page.get_by_role("button", name="日历页").click()
+                page.get_by_role("button", name="日历").click()
                 page.locator(".calendar-grid button.has-plan").first.wait_for(timeout=10000)
-                page.get_by_role("button", name="背单词页").click()
+                page.get_by_role("button", name="背单词").click()
                 page.locator(".study-plan-card-actions").get_by_role("button", name="设置").click()
-                assert page.get_by_role("dialog", name="设置背诵计划").is_visible()
+                assert page.get_by_role("dialog", name="编辑背诵计划").is_visible()
                 page.get_by_role("dialog").get_by_label("要背完一遍的天数").fill("2")
-                page.get_by_role("dialog").get_by_role("button", name="保存设置").click()
-                page.get_by_role("dialog", name="设置背诵计划").wait_for(state="detached", timeout=10000)
+                page.get_by_role("dialog").get_by_role("button", name="保存修改").click()
+                page.get_by_role("dialog", name="编辑背诵计划").wait_for(state="detached", timeout=10000)
                 assert page.locator(".study-plan-card").first.inner_text().find("0 / 2") >= 0
                 page.locator(".study-plan-card-actions").get_by_role("button", name="设置").click()
                 page.get_by_role("dialog").get_by_label("计划名（可选）").fill("")
-                page.get_by_role("dialog").get_by_role("button", name="保存设置").click()
-                page.get_by_role("dialog", name="设置背诵计划").wait_for(state="detached", timeout=10000)
+                page.get_by_role("dialog").get_by_role("button", name="保存修改").click()
+                page.get_by_role("dialog", name="编辑背诵计划").wait_for(state="detached", timeout=10000)
                 assert "艾宾浩斯" in page.locator(".study-plan-card").first.inner_text()
                 page.locator(".study-plan-card-actions").get_by_role("button", name="删除").click()
                 page.get_by_role("dialog", name="确认删除背诵计划").get_by_role("button", name="确认删除").click()
@@ -301,11 +291,7 @@ def main() -> None:
                 page.get_by_role("dialog").get_by_role("button", name="创建计划").click()
                 page.locator(".study-plan-view").wait_for(timeout=10000)
                 assert "葫芦背书法" in page.locator(".study-plan-card").first.inner_text()
-                page.locator(".page-rail .rail-settings").click()
-                page.get_by_label("每页单词数").fill("1")
-                page.get_by_role("button", name="保存配置").click()
-                page.get_by_role("status").get_by_text("配置已保存并应用").wait_for(timeout=10000)
-                page.get_by_role("button", name="背单词页").click()
+                page.get_by_label("每组单词数").select_option("1")
                 page.wait_for_function("document.querySelectorAll('.study-row').length === 1", timeout=10000)
                 assert page.locator(".study-row").count() == 1
                 page.locator(".study-mode-actions input[type=checkbox]").check()
@@ -331,7 +317,7 @@ def main() -> None:
                 assert page.locator(".study-plan-view .error-note").count() == 0
                 page.locator(".study-plan-card-actions").get_by_role("button", name="删除").click()
                 page.get_by_role("dialog", name="确认删除背诵计划").get_by_role("button", name="确认删除").click()
-                page.get_by_role("button", name="vocabulary-atlas").click()
+                page.get_by_role("button", name="词汇地图").click()
                 def relations_outside_families() -> bool:
                     return page.locator(".graph-canvas").evaluate("""svg => {
                       const circles = [...svg.querySelectorAll('.family-bubble')].map(group => {
@@ -470,7 +456,7 @@ def main() -> None:
                 assert relations_outside_families()
                 assert page.locator(".graph-node path").count() == 4
                 assert page.locator(".sense-card").count() > 0
-                assert page.locator(".sense-card .pending-label").first.inner_text() == "待核验"
+                assert page.locator(".sense-card .pending-label").count() == 0
                 page.locator(".ipa + .audio-button").first.wait_for(timeout=10000)
                 assert page.locator(".sense-card").first.locator(".definition-source .sources").count() == 1
                 before_drag = page.locator(".graph-node").evaluate_all("nodes => Object.fromEntries(nodes.map(node => [node.dataset.nodeId, node.getAttribute('transform')]))")
@@ -526,27 +512,8 @@ def main() -> None:
                 page.get_by_role("button", name="返回分屏").click()
                 page.get_by_role("slider", name="图谱缩放比例").fill("150")
                 page.get_by_role("button", name="加入收藏夹").click()
-                learning_before_conflict = store.state("learning", "default")
-                store.patch_learning(focused_id, "unfamiliar", learning_before_conflict["revision"], "default")
-                page.get_by_role("button", name="见过").click()
-                page.get_by_role("button", name="熟悉", exact=True).click()
-                for _ in range(50):
-                    if store.state("learning", "default")["words"].get(focused_id) == "familiar":
-                        break
-                    page.wait_for_timeout(100)
-                assert store.state("learning", "default")["words"].get(focused_id) == "familiar"
-                assert page.locator(".toast").filter(has_text="熟悉度未保存").count() == 0
                 page.get_by_role("button", name="收藏夹", exact=True).click()
                 page.locator(".favorite-row").first.wait_for()
-                page.get_by_role("button", name="设置", exact=True).click()
-                assert page.locator("#stage-select").input_value() == "all"
-                page.get_by_label("每页单词数").fill("7")
-                page.locator(".settings-grid label").filter(has_text="背景").first.locator("input[type=text]").fill("#123456")
-                page.get_by_role("button", name="保存配置").click()
-                page.get_by_role("status").get_by_text("配置已保存并应用").wait_for(timeout=10000)
-                assert store.config["study"]["wordsPerPage"] == 7, (store.config["study"],
-                    page.get_by_label("每页单词数").input_value())
-                assert page.locator(".app-shell").evaluate("el => el.style.getPropertyValue('--bg')") == "#123456"
                 page.locator(".tab").filter(has_text=word_tab_name).locator("span").nth(1).click()
                 page.locator(".word-page").wait_for(timeout=10000)
                 page.locator(".relation-pill").first.click()
@@ -558,16 +525,13 @@ def main() -> None:
                 page.locator(".candidate-page").wait_for(timeout=10000)
                 assert page.locator(".tab").filter(has_text="收藏夹").count() == 1
                 assert store.state("favorites")["words"]
-                assert store.state("learning")["words"]
                 assert store.state("ui")["graph"]["zoomPercent"] == 150
                 assert store.state("ui")["graph"]["visibleRelations"]["synonym"] is False
-                page.get_by_role("button", name="设置", exact=True).click()
-                page.locator("#stage-select").select_option("sample")
                 page.locator(".tab").filter(has_text=word_tab_name).locator("span").nth(1).click()
                 page.get_by_role("button", name="加入当前学龄段").click()
                 page.get_by_role("button", name="加入当前学龄段").wait_for(state="detached")
                 assert store.stage("sample")["words"]
-                page.get_by_role("button", name="项目页").click()
+                page.get_by_role("button", name="词表").click()
                 page.locator(".project-card .project-preview").first.click()
                 assert page.locator(".project-preview-pane span").count() == 2
                 page.get_by_role("button", name="新建项目").click()
@@ -604,23 +568,21 @@ def main() -> None:
                     page.wait_for_timeout(100)
                 assert unbuilt_id in store.state("ui")["graph"]["positions"]
                 assert relations_outside_families()
-                page.get_by_role("button", name="项目页").click()
-                page.locator(".project-card").filter(has_text="20 词界面测试").get_by_role("button", name="设置20 词界面测试").click()
+                page.get_by_role("button", name="词表").click()
+                page.locator(".project-card").filter(has_text="20 词界面测试").get_by_role("button", name="编辑20 词界面测试").click()
                 page.get_by_label("项目名").fill("20 词已重命名")
                 page.locator(".project-modal").get_by_role("button", name="保存").click()
                 page.locator(".project-modal").wait_for(state="detached")
                 assert store.project(store.state("ui")["activeProjectId"])["name"] == "20 词已重命名"
-                page.get_by_role("button", name="词典页").click()
+                page.get_by_role("button", name="词典").click()
                 page.locator(".dictionary-search input").fill("handily")
                 page.locator(".dictionary-results button").first.click()
                 page.locator(".candidate-page").wait_for(timeout=10000)
                 page.get_by_role("button", name="收藏夹", exact=True).click()
                 page.locator(".favorite-row").first.wait_for(timeout=10000)
                 assert page.locator(".favorite-row").count() == 1
-                page.get_by_role("button", name="设置", exact=True).click()
-                page.locator("#stage-select").select_option("all")
                 # Check complete spelling edges independently of the 500-node test.
-                page.get_by_role("button", name="项目页").click()
+                page.get_by_role("button", name="词表").click()
                 page.get_by_role("button", name="新建项目").click()
                 page.get_by_label("项目名").fill("全部拼写边测试")
                 page.locator(".project-modal textarea").fill("planet\nplaneta\nplanetb\nplanetc\nplanetd\nplanete")
@@ -633,7 +595,7 @@ def main() -> None:
                 page.wait_for_function("document.querySelectorAll('.graph-edge').length === 15")
                 spelling_button.click()
                 page.wait_for_function("document.querySelectorAll('.graph-edge').length === 0")
-                page.get_by_role("button", name="项目页").click()
+                page.get_by_role("button", name="词表").click()
                 page.get_by_role("button", name="新建项目").click()
                 page.get_by_label("项目名").fill("大词表图谱测试")
                 page.locator(".project-modal textarea").fill("pass\n" + "\n".join(
@@ -662,14 +624,14 @@ def main() -> None:
                 candidate_tab_id = previews[0]["tabId"]
                 page.locator(".tab.active").dblclick()
                 page.locator(".tab.active").get_by_role("button", name="取消固定标签").wait_for()
-                page.get_by_role("button", name="词典页").click()
+                page.get_by_role("button", name="词典").click()
                 page.locator(".dictionary-search input").fill("pass")
                 page.locator(".dictionary-results button").first.click()
                 page.locator(".word-page").wait_for()
                 page.locator(".save-state.saved").wait_for()
                 assert any(tab["tabId"] == candidate_tab_id and tab["pinned"] for tab in store.state("ui")["tabs"])
 
-                page.get_by_role("button", name="项目页").click()
+                page.get_by_role("button", name="词表").click()
                 page.locator(".project-card").filter(has_text="大词表图谱测试").get_by_role("button", name="预览", exact=True).click()
                 pane = page.locator(".project-preview-pane")
                 geometry = pane.evaluate("""element => {
@@ -685,7 +647,7 @@ def main() -> None:
                 assert geometry["paneScroll"] == 0
                 pair_project = overview_relation_fixture(store)
                 page.reload()
-                page.get_by_role("button", name="项目页").click()
+                page.get_by_role("button", name="词表").click()
                 page.locator(".project-card").filter(has_text=pair_project["name"]).locator(".project-open").click()
                 page.wait_for_function("document.querySelectorAll('.graph-node').length === 2 && document.querySelectorAll('.graph-edge').length === 1")
                 edge = page.locator('.graph-edge')
@@ -707,17 +669,6 @@ def main() -> None:
                 assert page.locator('.source-badge.ai').filter(has_text='置信度 0.95').count() >= 5
                 assert page.locator('.confidence-note').count() == 0
                 assert '多项 AI 内容使用相同置信度' not in page.locator('.word-page').inner_text()
-                # Relation blocks and canvas edges follow a saved custom color together.
-                page.locator('.page-rail .rail-settings').click()
-                page.locator('.settings-grid label').filter(has_text='关系颜色 / 近义词').locator('input[type=text]').fill('#67C5E8')
-                page.get_by_role('button', name='保存配置').click()
-                page.get_by_role('status').get_by_text('配置已保存并应用').wait_for()
-                page.get_by_role('button', name='vocabulary-atlas', exact=True).click()
-                page.keyboard.press('Escape')
-                node.click()
-                page.locator('.word-page h1').filter(has_text='makeshift').wait_for()
-                assert page.locator('.relation-mark.relation-near_synonym').evaluate('el => getComputedStyle(el).backgroundColor') == 'rgb(103, 197, 232)'
-                assert page.locator('.graph-edge').get_attribute('stroke') == '#67C5E8'
                 page.keyboard.press('Escape')
                 page.locator('.graph-density-note').wait_for()
                 page.wait_for_function("document.querySelectorAll('.graph-edge').length === 1")

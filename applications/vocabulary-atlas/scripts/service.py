@@ -11,6 +11,7 @@ import sys
 import threading
 import tempfile
 import uuid
+import traceback
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,10 +21,12 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
-from utils.scripts.dictionary_store import ConflictError, DictionaryStore, normalize_lemma
+from utils.scripts.dictionary_store import ConflictError, DictionaryStore, normalize_lemma, word_id
 from utils.scripts.dictionary_plans import PlanStore, plan_progress, round_complete, visible_order
 from utils.scripts.structured_io import write_text_atomic
 from utils.scripts.timestamp import iso_timestamp, unique_filename_timestamp
+from utils.scripts.app_server_config import load_server_config
+from utils.scripts.dictionary_wordlists import wordlist_files, prepare_wordlist, wordlist_name
 
 RUN_ID = re.compile(r"^\d{8}T\d{6}(?:_\d+)?$")
 
@@ -35,6 +38,35 @@ class RunManager:
         self.lock = threading.RLock()
         self.skill = root / ".agents" / "skills" / "build-word-entry" / "scripts" / "cli.py"
         self.python = Path(sys.executable)
+        self.diagnostic_path: Path | None = None
+
+    def diagnostic(self, event: str, **details) -> None:
+        """内部输出只写日志，不送给浏览器。"""
+        with self.lock:
+            if self.diagnostic_path is None:
+                base = self.root / "logs" / "vocabulary-atlas" / "runs"
+                base.mkdir(parents=True, exist_ok=True)
+                directory = base / unique_filename_timestamp([p.name for p in base.iterdir()])
+                directory.mkdir()
+                self.diagnostic_path = directory / "events.jsonl"
+            with self.diagnostic_path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({"at": iso_timestamp(), "event": event, **details}, ensure_ascii=False) + "\n")
+
+    @staticmethod
+    def public_status(raw: dict) -> dict:
+        status = raw.get("status", "")
+        detail = json.dumps(raw, ensure_ascii=False).lower()
+        if status == "completed":
+            return {"status": "completed", "message": "词条已完善，可以查看释义和关联。", "canResume": False}
+        if "agent_decision" in detail or "small_ai_decision" in detail:
+            return {"status": "needs_review", "message": "资料已收集，但词义和关联还需要核对，查询已暂停。你可以继续浏览其他单词，待核对完成后再查看。", "canResume": False}
+        if any(key in detail for key in ("captcha", "login", "browser_action", "browser_intervention")):
+            return {"status": "needs_browser", "message": "词典需要登录或验证。请在打开的浏览器完成操作，再点击“继续查找”。", "canResume": True}
+        if status in ("paused_quality_review", "paused_relation_review", "paused_word"):
+            return {"status": "needs_review", "message": "词典资料还需要核对，查询已暂停。你可以先浏览其他单词，待核对完成后再查看。", "canResume": False}
+        if status.startswith("paused") or status in ("error", "failed"):
+            return {"status": "paused", "message": "词典查询暂时未完成。你可以稍后重试，详细原因已记录在服务日志中。", "canResume": True}
+        return {"status": "processing", "message": "正在查找词义和关联，请保持服务开启。", "canResume": False}
 
     def existing(self, lemma: str) -> str | None:
         run_root = self.root / "logs" / "build-word-entry" / "runs"
@@ -47,14 +79,15 @@ class RunManager:
                 status = json.loads(state.read_text(encoding="utf-8"))["status"]
                 if req.get("kind") == "word" and normalize_lemma(req.get("word", "")) == lemma and status != "completed":
                     return directory.name
-            except (ValueError, KeyError):
-                continue
+            except (ValueError, KeyError) as exc:
+                raise ValueError(f"词条运行记录损坏：{directory.name}") from exc
         return None
 
     def _invoke(self, job_id: str, args: list[str]) -> None:
         try:
             process = subprocess.run([str(self.python), str(self.skill), *args, "--root", str(self.root)],
                                      cwd=self.root, capture_output=True, text=True, timeout=900)
+            self.diagnostic("word_query", jobId=job_id, returncode=process.returncode, stdout=process.stdout, stderr=process.stderr)
             lines = [line for line in process.stdout.splitlines() if line.strip().startswith("{")]
             payload = json.loads(lines[-1]) if lines else {}
             run_id = payload.get("run_id") or self.jobs[job_id].get("runId")
@@ -65,6 +98,7 @@ class RunManager:
             if process.returncode == 0 and run_id:
                 verified = subprocess.run([str(self.python), str(self.skill), "verify", "--root", str(self.root),
                                            "--run-id", run_id], cwd=self.root, capture_output=True, text=True, timeout=90)
+                self.diagnostic("word_verify", runId=run_id, returncode=verified.returncode, stdout=verified.stdout, stderr=verified.stderr)
                 if verified.returncode:
                     valid = False
                     error = verified.stderr[-500:] or "词条校验失败"
@@ -73,6 +107,7 @@ class RunManager:
                                                  "paused" if process.returncode == 3 and valid else "error"),
                                          runId=run_id, skillStatus=payload.get("status"), error=error)
         except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+            self.diagnostic("word_error", jobId=job_id, traceback=traceback.format_exc())
             with self.lock:
                 self.jobs[job_id].update(status="error", error=str(exc))
 
@@ -97,7 +132,12 @@ class RunManager:
         with self.lock:
             if job_id not in self.jobs:
                 raise FileNotFoundError(job_id)
-            return dict(self.jobs[job_id])
+            job = dict(self.jobs[job_id])
+            job.pop("error", None)
+            job.pop("skillStatus", None)
+            if job["status"] == "error":
+                job["message"] = "词条暂时无法建立，请稍后重试。详细原因已记录在服务日志中。"
+            return job
 
     def status(self, run_id: str) -> dict:
         if not RUN_ID.fullmatch(run_id):
@@ -106,9 +146,11 @@ class RunManager:
                                   "--run-id", run_id], cwd=self.root, capture_output=True, text=True, timeout=20)
         if process.returncode:
             raise ValueError(process.stderr[-500:] or "无法读取运行状态")
-        return json.loads(process.stdout)
+        raw = json.loads(process.stdout)
+        self.diagnostic("word_status", runId=run_id, state=raw)
+        return self.public_status(raw)
 
-    def resume(self, run_id: str, decision: dict | None = None) -> dict:
+    def resume(self, run_id: str) -> dict:
         if not RUN_ID.fullmatch(run_id):
             raise ValueError("runId 无效")
         with self.lock:
@@ -116,14 +158,6 @@ class RunManager:
                 if job.get("runId") == run_id and job["status"] == "running":
                     return dict(job)
         args = ["resume", "--run-id", run_id]
-        if decision is not None:
-            run_dir = self.root / "logs" / "build-word-entry" / "runs" / run_id
-            if not run_dir.is_dir():
-                raise FileNotFoundError(run_id)
-            existing = [file.stem.removeprefix("app-response_") for file in run_dir.glob("app-response_*.json")]
-            path = run_dir / f"app-response_{unique_filename_timestamp(existing)}.json"
-            write_text_atomic(path, json.dumps(decision, ensure_ascii=False, indent=2) + "\n")
-            args += ["--input", str(path)]
         with self.lock:
             for job in self.jobs.values():
                 if job.get("runId") == run_id and job["status"] == "running":
@@ -189,8 +223,17 @@ def make_handler(store: DictionaryStore, runs: RunManager):
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(payload)))
             self.send_header("Cache-Control", "no-store")
+            self._cors_headers()
             self.end_headers()
             self.wfile.write(payload)
+
+        def _cors_headers(self) -> None:
+            origin = self.headers.get("Origin", "")
+            if origin and origin == os.environ.get("VOCABULARY_ALLOWED_ORIGIN", ""):
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                self.send_header("Vary", "Origin")
 
         def _body(self) -> dict:
             size = int(self.headers.get("Content-Length", "0"))
@@ -204,8 +247,14 @@ def make_handler(store: DictionaryStore, runs: RunManager):
         def _dispatch(self) -> None:
             origin = self.headers.get("Origin", "")
             host = urlparse("http://" + self.headers.get("Host", "")).hostname
-            if host not in ("127.0.0.1", "localhost") or (origin and origin != "http://127.0.0.1:5185"):
+            config = load_server_config(ROOT / "applications" / "vocabulary-atlas")
+            allowed_hosts = set(os.environ.get("VOCABULARY_ALLOWED_HOSTS", config.host).split(","))
+            allowed_origin = os.environ.get("VOCABULARY_ALLOWED_ORIGIN", config.page_url)
+            if host not in allowed_hosts or (origin and origin != allowed_origin):
                 self._send(403, {"error": "不允许的请求来源"})
+                return
+            if self.command == "OPTIONS":
+                self._send(200, {})
                 return
             parsed = urlparse(self.path)
             path = parsed.path
@@ -215,22 +264,50 @@ def make_handler(store: DictionaryStore, runs: RunManager):
                 result = {"status": "ok", "entryCount": store.entry_count()}
             elif self.command == "GET" and path == "/api/bootstrap":
                 result = store.bootstrap()
-            elif self.command == "GET" and path == "/api/config":
-                result = store.config_snapshot()
-            elif self.command == "PUT" and path == "/api/config":
-                result = store.save_config(body["config"], body["expectedRevision"])
+            elif self.command == "GET" and path == "/api/wordlists":
+                result = []
+                known = store.entries()
+                directory = store.root / store.config["wordlists"]["directory"]
+                for file in wordlist_files(store.root, store.config):
+                    if not file.is_file():
+                        continue
+                    words, skipped = prepare_wordlist(file)
+                    result.append({"file": file.relative_to(directory).as_posix(), "name": wordlist_name(file),
+                                   "count": len(words),
+                                   "definitionCount": sum(word_id(word) in known for word in words),
+                                   "source": "仓库原有词表，原始发布来源未记录"})
+            elif self.command == "POST" and path == "/api/wordlists/use":
+                directory = store.root / store.config["wordlists"]["directory"]
+                available = {file.relative_to(directory).as_posix(): file
+                             for file in wordlist_files(store.root, store.config)}
+                file = available.get(body.get("file"))
+                if file is None:
+                    raise ValueError("词表不存在")
+                words, skipped = prepare_wordlist(file)
+                if not words:
+                    raise ValueError("词表没有可导入的单词")
+                if skipped:
+                    runs.diagnostic("wordlist_import_skipped", file=file.name, rows=skipped)
+                content = "\n".join(words)
+                source_file = file.relative_to(store.root).as_posix()
+                name = wordlist_name(file)
+                result = next((project for project in store.projects() if project.get("origin") == "builtin" and
+                               project.get("sourceFile") == source_file and
+                               {row["lemma"] for row in project["words"]} == set(words)), None)
+                if result is None:
+                    result = store.create_project(name, content, "text", origin="builtin", source_file=source_file)
             elif self.command == "GET" and path == "/api/projects":
                 result = store.projects()
             elif self.command == "GET" and path == "/api/plans":
                 result = [{**plan, "progress": plan_progress(plan),
-                           "roundComplete": round_complete(plan, plan["rounds"][-1], page_size=store.config["study"]["wordsPerPage"])}
+                           "roundComplete": round_complete(plan, plan["rounds"][-1], page_size=store.study_page_size())}
                           for plan in plans.list()]
             elif self.command == "GET" and path == "/api/today":
                 result = {"day": iso_timestamp()[:10]}
             elif self.command == "POST" and path == "/api/plans":
                 plan = plans.create(body)
                 result = {**plan, "progress": plan_progress(plan),
-                          "roundComplete": round_complete(plan, plan["rounds"][-1], page_size=store.config["study"]["wordsPerPage"])}
+                          "roundComplete": round_complete(plan, plan["rounds"][-1], page_size=store.study_page_size())}
             elif self.command == "GET" and path.startswith("/api/plans/date/"):
                 selected_day = path.split("/")[-1]
                 result = []
@@ -247,7 +324,7 @@ def make_handler(store: DictionaryStore, runs: RunManager):
             elif self.command == "GET" and re.fullmatch(r"/api/plans/plan_[0-9a-f]{32}/day/\d{4}-\d{2}-\d{2}", path):
                 parts = path.split("/")
                 plan = plans.get(parts[3])
-                page_size = int(query.get("pageSize", [store.config["study"]["wordsPerPage"]])[0])
+                page_size = int(query.get("pageSize", [store.study_page_size()])[0])
                 if not 1 <= page_size <= 100:
                     raise ValueError("每组单词数无效")
                 day = parts[5]
@@ -261,11 +338,11 @@ def make_handler(store: DictionaryStore, runs: RunManager):
             elif self.command == "GET" and path.startswith("/api/plans/"):
                 plan = plans.get(path.split("/")[-1])
                 result = {**plan, "progress": plan_progress(plan),
-                          "roundComplete": round_complete(plan, plan["rounds"][-1], page_size=store.config["study"]["wordsPerPage"])}
+                          "roundComplete": round_complete(plan, plan["rounds"][-1], page_size=store.study_page_size())}
             elif self.command == "PATCH" and path.startswith("/api/plans/"):
                 plan = plans.update(path.split("/")[-1], body["expectedRevision"], body["action"], body)
                 result = {**plan, "progress": plan_progress(plan),
-                          "roundComplete": round_complete(plan, plan["rounds"][-1], page_size=store.config["study"]["wordsPerPage"])}
+                          "roundComplete": round_complete(plan, plan["rounds"][-1], page_size=store.study_page_size())}
             elif self.command == "DELETE" and re.fullmatch(r"/api/plans/plan_[0-9a-f]{32}", path):
                 plans.delete(path.split("/")[-1], body["expectedRevision"])
                 result = {"deleted": True}
@@ -312,8 +389,6 @@ def make_handler(store: DictionaryStore, runs: RunManager):
                 result = {"deleted": True}
             elif self.command == "GET" and path == "/api/dictionary/search":
                 result = store.search(query.get("q", [""])[0], query.get("project", [None])[0])
-            elif self.command == "GET" and path.startswith("/api/projects/") and path.endswith("/learning"):
-                result = store.state("learning", path.split("/")[3])
             elif self.command == "GET" and path == "/api/words":
                 result = store.word_summaries(query.get("stage", ["all"])[0], query.get("project", [None])[0])
             elif self.command == "GET" and path.startswith("/api/words/"):
@@ -330,19 +405,18 @@ def make_handler(store: DictionaryStore, runs: RunManager):
                                      show_others=query.get("others", ["0"])[0] == "1",
                                      search=query.get("search", [""])[0],
                                      show_outside=query.get("outside", ["0"])[0] == "1",
-                                     project_id=query.get("project", [None])[0])
+                                     project_id=query.get("project", [None])[0],
+                                     offset=int(query.get("offset", ["0"])[0]))
             elif self.command == "POST" and path.startswith("/api/stages/") and path.endswith("/words"):
                 stage_id = path.split("/")[3]
                 result = store.add_to_stage(stage_id, body["wordId"], body["expectedRevision"])
             elif self.command == "PUT" and path == "/api/state/ui":
                 result = store.save_state("ui", body["state"], body["expectedRevision"])
-            elif self.command == "PATCH" and path.startswith("/api/learning/"):
-                result = store.patch_learning(path.split("/")[-1], body["level"], body["expectedRevision"], body.get("projectId"))
             elif self.command == "POST" and path.startswith("/api/favorites/"):
                 parts = path.split("/")
-                word_id = parts[3]
-                result = (store.opened(word_id, body["expectedRevision"]) if len(parts) == 5 and parts[4] == "opened" else
-                          store.patch_favorite(word_id, body["favorited"], body["expectedRevision"]))
+                favorite_word_id = parts[3]
+                result = (store.opened(favorite_word_id, body["expectedRevision"]) if len(parts) == 5 and parts[4] == "opened" else
+                          store.patch_favorite(favorite_word_id, body["favorited"], body["expectedRevision"]))
             elif self.command == "POST" and path == "/api/runs":
                 result = runs.start(body["lemma"])
             elif self.command == "GET" and path.startswith("/api/jobs/"):
@@ -350,7 +424,7 @@ def make_handler(store: DictionaryStore, runs: RunManager):
             elif path.startswith("/api/runs/"):
                 parts = path.split("/")
                 result = runs.status(parts[3]) if self.command == "GET" and len(parts) == 4 else \
-                    runs.resume(parts[3], body.get("decision")) if self.command == "POST" and len(parts) == 5 and parts[4] == "resume" else None
+                    runs.resume(parts[3]) if self.command == "POST" and len(parts) == 5 and parts[4] == "resume" else None
                 if result is None:
                     raise FileNotFoundError(path)
             elif self.command == "GET" and path.startswith("/api/audio/"):
@@ -362,6 +436,7 @@ def make_handler(store: DictionaryStore, runs: RunManager):
                 check = query.get("check", ["0"])[0] == "1"
                 self.send_header("Content-Length", str(0 if check else len(data)))
                 self.send_header("Cache-Control", "private, max-age=600")
+                self._cors_headers()
                 self.end_headers()
                 if not check:
                     self.wfile.write(data)
@@ -385,6 +460,9 @@ def make_handler(store: DictionaryStore, runs: RunManager):
         def do_DELETE(self) -> None:
             self._safe_dispatch()
 
+        def do_OPTIONS(self) -> None:
+            self._safe_dispatch()
+
         def _safe_dispatch(self) -> None:
             try:
                 if self.command in ("PUT", "POST", "PATCH", "DELETE"):
@@ -395,7 +473,8 @@ def make_handler(store: DictionaryStore, runs: RunManager):
             except ConflictError as exc:
                 self._send(409, {"error": str(exc)})
             except FileNotFoundError as exc:
-                self._send(404, {"error": str(exc)})
+                runs.diagnostic("request_error", path=self.path, traceback=traceback.format_exc())
+                self._send(404, {"error": "请求的内容不存在，请刷新后重试。"})
             except ValueError as exc:
                 runs.diagnostic("request_error", path=self.path, traceback=traceback.format_exc())
                 message = "词条查询暂时未完成，请稍后重试。" if "/api/runs" in self.path or "/api/jobs" in self.path else str(exc)
@@ -404,29 +483,36 @@ def make_handler(store: DictionaryStore, runs: RunManager):
                 runs.diagnostic("request_error", path=self.path, traceback=traceback.format_exc())
                 self._send(400, {"error": "操作未完成，请检查输入后重试。"})
             except Exception as exc:
-                self._send(500, {"error": f"服务错误：{exc}"})
+                runs.diagnostic("request_error", path=self.path, traceback=traceback.format_exc())
+                self._send(500, {"error": "服务暂时无法完成操作，请稍后重试。详细原因已记录在服务日志中。"})
 
     return Handler
 
 
-def create_server(root: Path, port: int = 5186) -> ThreadingHTTPServer:
+def create_server(root: Path, port: int | None = None, host: str | None = None) -> ThreadingHTTPServer:
     store = DictionaryStore(root)
-    store.migrate_entries()
+    from utils.scripts.dictionary_migration import needs_migration
+    if needs_migration(root):
+        store.migrate_entries()
     from utils.scripts.dictionary_spelling import sync
     sync(root)
-    return ThreadingHTTPServer(("127.0.0.1", port), make_handler(store, RunManager(root)))
+    store.entries()
+    config = load_server_config(root / "applications" / "vocabulary-atlas")
+    return ThreadingHTTPServer((host or config.host, port or config.service_port), make_handler(store, RunManager(root)))
 
 
 if __name__ == "__main__":
+    config = load_server_config(ROOT / "applications" / "vocabulary-atlas")
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=["serve", "migrate"])
     parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument("--port", type=int, default=5186)
+    parser.add_argument("--host", default=config.host)
+    parser.add_argument("--port", type=int, default=config.service_port)
     args = parser.parse_args()
     store = DictionaryStore(args.root)
     if args.command == "migrate":
         print(json.dumps(store.migrate_entries(), ensure_ascii=False))
     else:
-        server = create_server(args.root, args.port)
-        print(f"vocabulary-atlas服务 http://127.0.0.1:{args.port}", flush=True)
+        server = create_server(args.root, args.port, args.host)
+        print(f"vocabulary-atlas服务 http://{args.host}:{args.port}", flush=True)
         server.serve_forever()

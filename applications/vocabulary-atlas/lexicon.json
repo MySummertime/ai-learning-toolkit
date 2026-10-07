@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1.0",
+  "wordlists": [
+    "dictionaries/wordlists/IELTS/IELTS_4321.json"
+  ],
+  "resources": {
+    "ecdict": {
+      "file": "dictionaries/resources/ecdict.csv",
+      "downloadUrl": "https://raw.githubusercontent.com/skywind3000/ECDICT/master/ecdict.csv",
+      "sourceUrl": "https://github.com/skywind3000/ECDICT",
+      "version": "master-snapshot",
+      "license": "MIT"
+    },
+    "wordnet": {
+      "file": "dictionaries/resources/english-wordnet-2025.xml.gz",
+      "downloadUrl": "https://en-word.net/downloads/english-wordnet-2025.xml.gz",
+      "sourceUrl": "https://en-word.net/",
+      "version": "2025",
+      "license": "CC-BY-4.0"
+    }
+  },
+  "relations": {
+    "derivation": "family",
+    "antonym": "antonym",
+    "similar": "near_synonym"
+  },
+  "exchangeKinds": {
+    "p": "past",
+    "d": "past_participle",
+    "i": "present_participle",
+    "3": "third_person_singular",
+    "r": "comparative",
+    "t": "superlative",
+    "s": "plural"
+  }
+}

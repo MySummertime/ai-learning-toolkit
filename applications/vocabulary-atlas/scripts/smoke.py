@@ -27,6 +27,9 @@ RUN_ID = filename_timestamp()
 
 
 class FakeRuns:
+    def diagnostic(self, event: str, **details) -> None:
+        pass
+
     def existing(self, lemma: str) -> None:
         return None
 
@@ -37,10 +40,10 @@ class FakeRuns:
         return {"jobId": job_id, "runId": RUN_ID, "status": "completed"}
 
     def status(self, run_id: str) -> dict:
-        return {"run_id": run_id, "status": "paused_quality_review"}
+        return service.RunManager.public_status({"status": "paused_quality_review"})
 
-    def resume(self, run_id: str, decision: dict | None = None) -> dict:
-        return {"runId": run_id, "jobId": "resume-job", "status": "running", "decisionProvided": decision is not None}
+    def resume(self, run_id: str) -> dict:
+        return {"runId": run_id, "jobId": "resume-job", "status": "running"}
 
 
 def call(base: str, path: str, method: str = "GET", body: dict | None = None) -> tuple[int, dict]:
@@ -57,6 +60,7 @@ def call(base: str, path: str, method: str = "GET", body: dict | None = None) ->
 def fixture(root: Path) -> None:
     (root / ".agents" / "skills" / "build-word-entry" / "references").mkdir(parents=True)
     (root / "applications" / "vocabulary-atlas").mkdir(parents=True)
+    (root / "dictionaries" / "wordlists").mkdir(parents=True)
     (root / "outputs" / "英文词典" / "entries").mkdir(parents=True)
     shutil.copy2(ROOT / ".agents" / "skills" / "build-word-entry" / "references" / "entry.schema.json",
                  root / ".agents" / "skills" / "build-word-entry" / "references" / "entry.schema.json")
@@ -374,8 +378,6 @@ def main() -> None:
             source = store.entry(word["wordId"])
             relation = next(item for item in source["relationships"] if item.get("targetLemma") and not item.get("targetWordId"))
             assert call(base, f"/api/candidates?lemma={quote(relation['targetLemma'])}")[1]["associations"]
-            level = call(base, f"/api/learning/{word['wordId']}", "PATCH", {"level": "seen", "expectedRevision": 1})[1]
-            assert level["words"][word["wordId"]] == "seen"
             created = call(base, "/api/projects", "POST", {"name": "另一个项目", "content": word["lemma"], "format": "text"})[1]
             assert created["projectId"] != "default" and len(created["words"]) == 1
             plan = call(base, "/api/plans", "POST", {"projectId": created["projectId"],
@@ -439,13 +441,8 @@ def main() -> None:
             assert renamed["name"] == "第二项目" and renamed["revision"] == 2
             assert call(base, f"/api/projects/{created['projectId']}", "PUT", {"name": "旧版本", "expectedRevision": 1})[0] == 409
             single_project_graph = call(base, f"/api/graph?project={created['projectId']}")[1]
-            assert [node["wordId"] for node in single_project_graph["nodes"] if node["kind"] == "entry"] == [word["wordId"]]
+            assert word["wordId"] in [node["wordId"] for node in single_project_graph["nodes"] if node["kind"] == "entry"]
             assert any(node["kind"] == "inflection" for node in single_project_graph["nodes"])
-            assert call(base, f"/api/projects/{created['projectId']}/learning")[1]["words"] == {}
-            assert call(base, f"/api/learning/{word['wordId']}", "PATCH", {"level": "familiar", "expectedRevision": 1,
-                "projectId": created["projectId"]})[1]["words"][word["wordId"]] == "familiar"
-            assert store.state("learning", "default")["words"][word["wordId"]] == "seen"
-            assert call(base, f"/api/learning/{word['wordId']}", "PATCH", {"level": "familiar", "expectedRevision": 1})[0] == 409
             favorite = call(base, f"/api/favorites/{word['wordId']}", "POST", {"favorited": True, "expectedRevision": 1})[1]
             assert favorite["words"][word["wordId"]]["favoritedAt"] == favorite["words"][word["wordId"]]["lastOpenedAt"]
             assert word["wordId"] in store.state("favorites")["words"]
@@ -470,8 +467,8 @@ def main() -> None:
             assert list((root / "outputs" / "vocabulary-atlas" / "cache" / "audio").glob("*.wav"))
             assert call(base, "/api/runs", "POST", {"lemma": "example"})[1]["jobId"] == "test-job"
             assert call(base, "/api/jobs/test-job")[1]["status"] == "completed"
-            assert call(base, f"/api/runs/{RUN_ID}")[1]["status"] == "paused_quality_review"
-            assert call(base, f"/api/runs/{RUN_ID}/resume", "POST", {"decision": {"ok": True}})[1]["decisionProvided"]
+            assert call(base, f"/api/runs/{RUN_ID}")[1]["status"] == "needs_review"
+            assert call(base, f"/api/runs/{RUN_ID}/resume", "POST", {})[1]["jobId"] == "resume-job"
             graph_entries = list(store.entries().values())
             source_entry, target_entry = graph_entries[0], graph_entries[1]
             antonym = json.loads(json.dumps(next(item for item in source_entry["relationships"] if item["type"] == "synonym")))
@@ -485,7 +482,7 @@ def main() -> None:
             assert {"synonym", "near_synonym"} <= {edge["type"] for edge in focused["edges"]}
             overview = store.graph()
             assert {"synonym", "near_synonym", "antonym"} <= {edge["type"] for edge in overview["edges"]}
-            assert overview["families"] and all(edge["type"] != "family" for edge in overview["edges"])
+            assert overview["families"] and any(edge["type"] == "family" for edge in overview["edges"])
             assert focused["placeholderCount"] > 0
             related = {source_entry["wordId"]}
             related.update(node_id for family in focused["families"]
@@ -517,19 +514,12 @@ def main() -> None:
                        for family in overview["families"])
             searched = store.graph(search="pass")
             assert searched["nodes"] and all("pass" in node["lemma"] for node in searched["nodes"])
-            config_state = call(base, "/api/config")[1]
-            config_state["config"]["study"]["wordsPerPage"] = 5
-            saved_config = call(base, "/api/config", "PUT", {
-                "config": config_state["config"], "expectedRevision": config_state["revision"]})[1]
-            assert saved_config["config"]["study"]["wordsPerPage"] == 5
-            assert call(base, "/api/bootstrap")[1]["config"]["study"]["wordsPerPage"] == 5
-            assert DictionaryStore(root).config["study"]["wordsPerPage"] == 5
-            assert call(base, "/api/config", "PUT", {
-                "config": config_state["config"], "expectedRevision": config_state["revision"]})[0] == 409
-            invalid_config = json.loads(json.dumps(saved_config["config"]))
-            invalid_config["study"]["wordsPerPage"] = 0
-            assert call(base, "/api/config", "PUT", {
-                "config": invalid_config, "expectedRevision": saved_config["revision"]})[0] == 400
+            assert call(base, "/api/config")[0] == 404
+            assert call(base, "/api/config", "PUT", {"config": store.config})[0] == 404
+            ui = store.state("ui")
+            ui["study"]["pageSize"] = 5
+            store.save_state("ui", ui, ui["revision"])
+            assert store.study_page_size() == 5
             hulu_project = call(base, "/api/projects", "POST", {"name": "葫芦测试",
                 "content": "alpha\nbeta\ngamma\ndelta\nepsilon", "format": "text"})[1]
             hulu = call(base, "/api/plans", "POST", {"projectId": hulu_project["projectId"],
@@ -611,8 +601,7 @@ def main() -> None:
             assert candidate_edge["ruleClassified"]
             assert call(base, pair_url + "&near_synonym=0")[1]["edges"] == []
             assert call(base, pair_url)[1]["edges"] == pair_graph["edges"]
-            # Relations to a visible family node must not be dropped merely because
-            # the target is represented by its lemma rather than a full word entry.
+            # Include relations whose visible family target is represented by its lemma.
             import copy
             alternative = copy.deepcopy(next(e for e in store.entries().values() if e["lemma"] == "alternative"))
             alternative["derivatives"] = [{"derivativeId": "overview_derivative", "word": "alternatively",
@@ -640,17 +629,15 @@ def main() -> None:
             config_path = root / "applications" / "vocabulary-atlas" / "config.yaml"
             config_path.write_text(yaml.safe_dump(legacy), encoding="utf-8")
             assert DictionaryStore(root).config["graph"]["physics"]["familyNodeGap"] == 8
-            current = call(base, "/api/config")[1]
-            assert current["config"]["graph"]["physics"]["familyNodeGap"] == 8
+            from utils.scripts.dictionary_contract import validate
             for gap in (-1, 65):
-                invalid = json.loads(json.dumps(current["config"]))
+                invalid = json.loads(json.dumps(store.config))
                 invalid["graph"]["physics"]["familyNodeGap"] = gap
-                assert call(base, "/api/config", "PUT", {"config": invalid,
-                    "expectedRevision": current["revision"]})[0] == 400
-            current["config"]["graph"]["physics"]["familyNodeGap"] = 12
-            assert call(base, "/api/config", "PUT", {"config": current["config"],
-                "expectedRevision": current["revision"]})[0] == 200
-            assert call(base, "/api/bootstrap")[1]["config"]["graph"]["physics"]["familyNodeGap"] == 12
+                try:
+                    validate("dictionary-config-v1.schema.json", invalid)
+                    raise AssertionError("invalid gap accepted")
+                except __import__("jsonschema").ValidationError:
+                    pass
         finally:
             server.shutdown()
             server.server_close()
