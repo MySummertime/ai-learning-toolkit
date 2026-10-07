@@ -256,7 +256,7 @@ def _adopt_model(target, value):
 
 
 def save(project, model, config, material_backup=None):
-    # Resume always revalidates authoritative JSON, never trusts a stale diagram.
+    # Resume validates the authoritative JSON before rebuilding the diagram.
     workflow = WorkflowCheckpoint(DOCUMENT_TRANSITIONS, Path(model['run_dir']) / 'document-render', resume=True)
     if workflow.state not in ('prepared', 'paused_error'):
         workflow.move('paused_error', error='上次文档生成中断，重新校验权威数据', resume_stage='validating_graphs')
@@ -281,7 +281,7 @@ def _save_documents(project, model, config, material_backup, workflow):
     docs = documents(model, project, config)
     workflow.move('verifying_documents')
     verify_roadmap_flowcharts(model, docs['学习路线'][1])
-    # Readers hold the lock, so they cannot observe a partially published revision.
+    # Readers acquire the publication lock for a consistent revision.
     updates = {art(project, name): value for name, (value, _) in docs.items()}
     updates[project / '项目.json'] = {'schema_version': '3.0', 'project_id': model['project_id'], 'title': model['title'],
          'revision': model['revision'], 'status': model['project_status'], 'updated_at': model['updated_at'],

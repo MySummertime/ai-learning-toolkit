@@ -63,8 +63,8 @@ def _read_project_files(workspace: Path) -> dict[str, dict]:
                     "revision": project.get("revision"),
                     "lastWriterId": project.get("lastWriterId"),
                 }
-        except (OSError, json.JSONDecodeError, TypeError):
-            continue
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            raise ValueError(f"项目诊断读取失败：{project_file.parent.name}") from exc
     return projects
 
 def _analyze(workspace: Path, flow: WorkflowCheckpoint) -> dict:

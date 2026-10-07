@@ -429,8 +429,7 @@ def validate_cloze_quality(text: str, spans: list[dict[str, Any]]) -> dict[str, 
                 sentence_failures.append(f"第 {index} 句的公式表达式被拆断")
             if (before.endswith("这就是") or before.endswith("这种现象叫作")) and re.match(r"^[。！？；]?$", after):
                 sentence_failures.append(f"第 {index} 句的命名结论被挖空")
-            # Use the full following text so a semicolon does not hide a
-            # comparison that immediately repeats the answer.
+            # Search the full following text for comparisons that repeat the answer.
             following = canonical[span_end:]
             repeated = re.match(rf"^(?:有关|相关)[，,；;]\s*({re.escape(answer)})越", following)
             repeat_start = span_end + repeated.start(1) if repeated else -1

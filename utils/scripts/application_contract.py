@@ -21,11 +21,10 @@ def _add(findings: list[dict[str, Any]], kind: str, path: str, suggestion: str,
 
 
 def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-        return value if isinstance(value, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"审计文件须为 JSON 对象：{path.name}")
+    return value
 
 
 def _extract_phase_states(text: str) -> list[str]:

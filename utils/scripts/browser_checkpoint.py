@@ -15,10 +15,7 @@ def visible_browser():
     except ImportError as exc:
         raise RuntimeError("缺少 playwright；请安装 runtime/.venv/requirements.txt") from exc
     with sync_playwright() as playwright:
-        try:
-            browser = playwright.chromium.launch(channel="chrome", headless=False)
-        except Exception:
-            browser = playwright.chromium.launch(channel="msedge", headless=False)
+        browser = playwright.chromium.launch(channel="chrome", headless=False)
         try:
             yield browser
         finally:

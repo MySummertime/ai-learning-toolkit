@@ -314,11 +314,11 @@ def ensure_backup(root, project, navigation, run_dir, approved_plan_sha256=None,
                         raise BackupConflict(file['backup_path'])
                     continue
                 target.parent.mkdir(parents=True, exist_ok=True)
-                # A partial copy stays in project staging, never at a published path.
+                # Partial copies are stored in project staging.
                 temporary = checked_path(project, Path('artifacts/material-backup-staging') / file['sha256'])
                 temporary.parent.mkdir(parents=True, exist_ok=True)
                 # A crash may leave a staging hard link to an already published copy.
-                # Detach it before writing, so a failed retry cannot damage that copy.
+                # Create an independent copy before writing the retry payload.
                 temporary.unlink(missing_ok=True)
                 shutil.copyfile(source, temporary)
                 if sha256_file(temporary) != file['sha256'] or sha256_file(source) != file['sha256']:

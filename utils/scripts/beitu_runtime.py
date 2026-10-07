@@ -16,6 +16,7 @@ from urllib.request import urlopen
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from utils.scripts.workflow_checkpoint import WorkflowCheckpoint, create_run_directory
+from utils.scripts.app_server_config import load_server_config
 
 APP = ROOT / "applications" / "image-recall-studio"
 TRANSITIONS = {
@@ -31,12 +32,12 @@ TRANSITIONS = {
 }
 
 
-def check_port(port: int) -> None:
+def check_port(port: int, host: str) -> None:
     with socket.socket() as probe:
         if os.name == "nt":
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         try:
-            probe.bind(("127.0.0.1", port))
+            probe.bind((host, port))
         except OSError as error:
             raise RuntimeError(f"端口 {port} 已被占用，请先关闭原来的启动终端；不会复用已有服务") from error
 
@@ -62,9 +63,10 @@ def stop_process(process: subprocess.Popen | None) -> None:
 
 
 def main() -> int:
+    config = load_server_config(APP)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", type=int, default=5173)
-    parser.add_argument("--service-port", type=int, default=5174)
+    parser.add_argument("--port", type=int, default=config.page_port)
+    parser.add_argument("--service-port", type=int, default=config.service_port)
     parser.add_argument("--workspace", type=Path, default=ROOT / "outputs" / "image-recall-studio")
     parser.add_argument("--preview", action="store_true")
     args = parser.parse_args()
@@ -77,22 +79,22 @@ def main() -> int:
         flow.move("checking_port")
         if args.port == args.service_port:
             raise RuntimeError("GUI 和服务端口不能相同")
-        check_port(args.port)
-        check_port(args.service_port)
+        check_port(args.port, config.host)
+        check_port(args.service_port, config.host)
         node, npm = shutil.which("node"), shutil.which("npm") or shutil.which("pnpm")
         if not node or not npm:
             raise RuntimeError("需要安装 Node.js 和 npm")
         workspace = args.workspace.resolve()
         workspace.mkdir(parents=True, exist_ok=True)
         instance = str(uuid.uuid4())
-        env = {**os.environ, "VITE_BEITU_API_URL": f"http://127.0.0.1:{args.service_port}",
-               "BEITU_ALLOWED_ORIGIN": f"http://127.0.0.1:{args.port}", "PYTHONUTF8": "1"}
+        env = {**os.environ, "VITE_BEITU_API_URL": f"http://{config.host}:{args.service_port}",
+               "BEITU_ALLOWED_ORIGIN": f"http://{config.host}:{args.port}", "PYTHONUTF8": "1"}
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         flow.move("starting_service")
         service_log = (run_dir / "service.log").open("w", encoding="utf-8")
         service = subprocess.Popen([
             sys.executable, "-B", "-u", str(APP / "scripts" / "workspace_service.py"),
-            "--workspace", str(workspace), "--port", str(args.service_port),
+            "--workspace", str(workspace), "--host", config.host, "--port", str(args.service_port),
             "--instance-id", instance, "--log-dir", str(run_dir),
         ], stdout=service_log, stderr=subprocess.STDOUT, env=env, creationflags=flags)
         flow.move("verifying_workspace", servicePid=service.pid, serviceWorkspace=str(workspace))
@@ -120,10 +122,10 @@ def main() -> int:
         command = [node, str(APP / "node_modules" / "vite" / "bin" / "vite.js")]
         if args.preview:
             command.append("preview")
-        gui = subprocess.Popen(command + ["--host", "127.0.0.1", "--port", str(args.port), "--strictPort"],
+        gui = subprocess.Popen(command + ["--host", config.host, "--port", str(args.port), "--strictPort"],
                                cwd=APP, env=env)
         flow.move("running", guiPid=gui.pid)
-        print(f"打开 http://127.0.0.1:{args.port}；按 Ctrl+C 关闭。日志：{run_dir}", flush=True)
+        print(f"打开 http://{config.host}:{args.port}；按 Ctrl+C 关闭。日志：{run_dir}", flush=True)
         while gui.poll() is None:
             if service.poll() is not None:
                 raise RuntimeError("本地写入服务意外退出")

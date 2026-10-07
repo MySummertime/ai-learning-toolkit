@@ -55,8 +55,7 @@ def imported_modules(root: Path) -> set[str]:
         for p in base.rglob('*.py'):
             parts = set(p.relative_to(root).parts)
             if parts & EXCLUDED or '.backup' in parts or '.venv' in parts: continue
-            try: tree = ast.parse(p.read_text(encoding='utf-8'))
-            except (SyntaxError, UnicodeDecodeError): continue
+            tree = ast.parse(p.read_text(encoding='utf-8'))
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import): mods.update(a.name.split('.')[0] for a in node.names)
                 elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0: mods.add(node.module.split('.')[0])
@@ -66,19 +65,14 @@ def installed_versions(root: Path) -> dict[str, str]:
     exe = root/'runtime/.venv/Scripts/python.exe' if os.name == 'nt' else root/'runtime/.venv/bin/python'
     if not exe.is_file(): return {}
     code = 'import importlib.metadata as m, json; print(json.dumps({d.metadata["Name"].lower().replace("_","-"):d.version for d in m.distributions() if d.metadata.get("Name")}))'
-    try:
-        out = subprocess.check_output([str(exe), '-c', code], text=True, stderr=subprocess.STDOUT, timeout=20)
-        return json.loads(out)
-    except Exception: return {}
+    out = subprocess.check_output([str(exe), '-c', code], text=True, stderr=subprocess.STDOUT, timeout=20)
+    return json.loads(out)
 
 def version_ok(version: str, spec: str) -> bool:
     if not spec: return True
-    try:
-        from packaging.specifiers import SpecifierSet
-        from packaging.version import Version
-        return Version(version) in SpecifierSet(spec)
-    except Exception:
-        return True
+    from packaging.specifiers import SpecifierSet
+    from packaging.version import Version
+    return Version(version) in SpecifierSet(spec)
 
 def prose_lines(text: str):
     """Yield numbered Markdown lines outside fenced code blocks."""
@@ -109,10 +103,7 @@ def document_reference_findings(root: Path, docs: list[Path]) -> list[dict[str, 
     findings = []
     app_contexts: dict[Path, Path] = {}
     for manifest_path in (root / 'applications').glob('*/application-audit.json'):
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-        except (OSError, ValueError):
-            continue
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
         documents = manifest.get('documents', {}) if isinstance(manifest, dict) else {}
         if isinstance(documents, dict):
             for reference in documents.values():
@@ -199,10 +190,8 @@ def audit(root: Path, previous: dict[str, Any] | None = None) -> tuple[dict[str,
     findings.extend(document_reference_findings(root, docs))
     version=(root/'VERSION').read_text(encoding='utf-8').strip() if (root/'VERSION').is_file() else None
     marketplace=root/'config/plugin/marketplace.json'; plugin=root/'config/plugin/plugin.json'
-    try: market=json.loads(marketplace.read_text(encoding='utf-8'))
-    except Exception: market={}
-    try: manifest=json.loads(plugin.read_text(encoding='utf-8'))
-    except Exception: manifest={}
+    market=json.loads(marketplace.read_text(encoding='utf-8'))
+    manifest=json.loads(plugin.read_text(encoding='utf-8'))
     market_version=((market.get('plugins') or [{}])[0]).get('version')
     if version is None: add(findings,'missing_version','VERSION','创建只包含版本号的 VERSION 文件')
     elif market_version != version: add(findings,'version_mismatch','config/plugin/marketplace.json','使 marketplace 版本与 VERSION 一致',market_version,version,['VERSION'])
@@ -262,8 +251,7 @@ def audit(root: Path, previous: dict[str, Any] | None = None) -> tuple[dict[str,
         if unknown: add(findings,'env_key_not_declared',env_path,'删除未在 .env.example 声明的键或补充示例声明',unknown,sorted(example_keys),['.env.example'])
     req=parse_requirements(root/'runtime/.venv/requirements.txt'); mods=imported_modules(root)
     map_path=root/'utils/references/python-package-map.json'
-    try: mapping=json.loads(map_path.read_text(encoding='utf-8'))
-    except Exception: mapping={'yaml':'pyyaml','jsonschema':'jsonschema'}
+    mapping=json.loads(map_path.read_text(encoding='utf-8'))
     std=set(getattr(sys,'stdlib_module_names',())) | {'__future__'}
     local={p.stem for base in (root / '.agents' / 'skills',root/'utils',root/'runtime') if base.exists() for p in base.rglob('*.py')}
     mapping={str(k).lower():str(v).lower() for k,v in mapping.items()}

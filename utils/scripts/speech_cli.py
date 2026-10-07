@@ -141,7 +141,7 @@ def verify_installation(skill_dir: Path, environment: bool = False) -> dict:
                         if audio.getnframes() <= 0 or audio.getsampwidth() != 2:
                             errors.append("Invalid white-noise asset")
             except (OSError, ValueError, TypeError, KeyError, AttributeError, yaml.YAMLError, wave.Error) as exc:
-                # Never include YAML parser excerpts, since malformed configs may contain credentials.
+                # Return the YAML error type and record a redacted diagnostic.
                 errors.append(str(exc) if isinstance(exc, ValueError) else "TTS 配置、音色映射或素材无效：" + type(exc).__name__)
     return {"status": "passed" if not errors else "failed", "errors": errors,
             "skill": skill_dir.name, "cloud_verified": False}

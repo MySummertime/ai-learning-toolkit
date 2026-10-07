@@ -42,9 +42,7 @@ def _remove_translation_subsections(lines: list[str]) -> list[str]:
     skipping = False
     for line in lines:
         marker = normalize_for_matching(line)
-        # Some EPUBs emit a chapter title as a plain paragraph immediately
-        # before the corresponding XHTML heading.  Drop that marker so it
-        # cannot leak into the preceding writing block.
+        # Remove the plain chapter title preceding its XHTML heading.
         if re.search(r"翻译\s*考前预测", marker, re.I):
             skipping = True
             continue

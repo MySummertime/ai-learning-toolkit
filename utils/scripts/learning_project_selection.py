@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 from functools import lru_cache
 from pathlib import Path
 
@@ -61,7 +62,8 @@ def tutor_projects(root: Path, navigation: Path):
             saved = read_json(checkpoint)
             if isinstance(saved, dict) and isinstance(saved.get('project_dir'), str):
                 paths.add(safe_path(root, saved['project_dir']) / '项目.json')
-        except (ValueError, KeyError, OSError):
+        except (ValueError, KeyError, OSError) as exc:
+            logging.getLogger(__name__).warning("项目发现跳过无效记录：%s", exc)
             continue
     projects = []
     for path in sorted(paths):
@@ -75,11 +77,12 @@ def tutor_projects(root: Path, navigation: Path):
                 model = lp.load(path.parent)
             if safe_path(root, model['navigation_json']) != navigation:
                 continue
-            # Metadata discovery does not alter progress or require an intact backup.
+            # Read project metadata for the selection list.
             projects.append({'project_id': model['project_id'], 'title': model['title'],
                              'project_dir': path.parent.relative_to(root).as_posix(),
                              'state': model['state'], 'revision': model['revision']})
-        except (ValueError, KeyError, OSError):
+        except (ValueError, KeyError, OSError) as exc:
+            logging.getLogger(__name__).warning("项目发现跳过无效记录：%s", exc)
             continue
     return projects
 
@@ -112,7 +115,8 @@ def discover(root: Path):
                         candidates[path] = state['run_id']
             else:
                 known.setdefault(claimed, 'invalid')
-        except (ValueError, KeyError, OSError):
+        except (ValueError, KeyError, OSError) as exc:
+            logging.getLogger(__name__).warning("导航检查点无效：%s：%s", checkpoint, exc)
             known.setdefault(claimed, 'invalid')
             continue
     # Published default runs also work when local audit logs were removed.
@@ -121,7 +125,8 @@ def discover(root: Path):
             path = safe_path(root, path)
             if path not in known:
                 candidates.setdefault(path, path.parent.name)
-        except ValueError:
+        except ValueError as exc:
+            logging.getLogger(__name__).warning("导航路径无效：%s：%s", path, exc)
             continue
     entries = []
     navigation_hashes = {}
@@ -131,14 +136,16 @@ def discover(root: Path):
             reason = ''
             try:
                 nav = valid_navigation(root, path)
-            except (ValueError, KeyError, OSError):
+            except (ValueError, KeyError, OSError) as exc:
+                logging.getLogger(__name__).warning("原始导航读取失败：%s：%s", path, exc)
                 nav = None
                 for project in projects:
                     try:
                         nav = valid_navigation(root, path, safe_path(root, project['project_dir']))
                         reason = '已有材料副本可恢复；新建仍需原始材料有效'
                         break
-                    except (ValueError, KeyError, OSError):
+                    except (ValueError, KeyError, OSError) as exc:
+                        logging.getLogger(__name__).warning("材料副本读取失败：%s：%s", project['project_dir'], exc)
                         continue
                 if nav is None:
                     continue
@@ -152,7 +159,8 @@ def discover(root: Path):
                                  ROOT / 'utils/references/learning-project-catalog-v1.schema.json')
             navigation_hashes[relative] = json_digest(nav)
             entries.append(entry)
-        except (ValueError, KeyError, OSError):
+        except (ValueError, KeyError, OSError) as exc:
+            logging.getLogger(__name__).warning("项目发现跳过无效记录：%s", exc)
             continue
     entries.sort(key=lambda item: (item['updated_at'], item['run_id'], item['candidate_id']), reverse=True)
     catalog = {'schema_version': '1.0', 'catalog_sha256': json_digest({'entries': entries, 'navigation_hashes': navigation_hashes}), 'entries': entries}
