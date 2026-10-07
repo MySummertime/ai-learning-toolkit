@@ -1,10 +1,13 @@
 [CmdletBinding()]
 param(
-  [int]$Port = 5175,
-  [int]$ServicePort = 5176,
+  [int]$Port = 0,
+  [int]$ServicePort = 0,
   [switch]$Preview
 )
 $ErrorActionPreference = 'Stop'
+$serverConfig = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'server.json') -Raw | ConvertFrom-Json
+if ($Port -eq 0) { $Port = [int]$serverConfig.pagePort }
+if ($ServicePort -eq 0) { $ServicePort = [int]$serverConfig.servicePort }
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $pythonPath = Join-Path $repoRoot 'runtime/.venv/Scripts/python.exe'
 if (-not (Test-Path -LiteralPath $pythonPath)) {

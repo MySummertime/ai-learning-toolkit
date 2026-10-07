@@ -20,7 +20,9 @@ macOS 本地部署默认使用项目根目录 `environment.yml` 定义的 `ai-le
 
 ## Python 环境
 
-当前使用 Python 3.11；测试版本为 Python 3.11.5。Python 依赖声明位于 `runtime/.venv/requirements.txt`，虚拟环境的实际文件不纳入 Git。
+macOS 使用根目录 `environment.yml` 定义的 `ai-learning-toolkit` Conda 环境；其中已声明 PyYAML、jsonschema、Playwright、Node.js 和 pnpm。先执行 `conda env update -f environment.yml`，再用 `conda run -n ai-learning-toolkit python ...` 运行脚本。以下 `runtime/.venv` 路径仅用于 Windows 的旧版 venv 工作流，不要在 macOS 上用它代替 Conda 环境。
+
+Windows venv 的依赖声明位于 `runtime/.venv/requirements.txt`，虚拟环境的实际文件不纳入 Git。
 
 `runtime/` 只保存隔离运行环境、依赖声明和本说明。Skill 的请求快照、Agent 输入、状态机中间 JSON、日志和报告必须写入 `logs/<skill>/runs/<run-id>/` 或 `outputs/<skill>/runs/<run-id>/`，不得在此目录新增或更新运行产物。
 
@@ -30,11 +32,11 @@ runtime/.venv/Scripts/python.exe -m pip install -r runtime/.venv/requirements.tx
 runtime/.venv/Scripts/python.exe --version
 ```
 
-依赖包括 `jsonschema`、`pytest`、`PyYAML` 和 `playwright`，分别用于 Schema 校验、测试、敏感信息策略解析和可见浏览器采集。`build-word-entry` 使用本机安装的 Chrome，不保存浏览器会话到正式产物。使用项目 Skills 时，优先调用 `runtime/.venv/Scripts/python.exe`。
+依赖包括 `jsonschema`、`pytest`、`PyYAML` 和 `playwright`，分别用于 Schema 校验、测试、配置解析和浏览器采集。macOS 使用 Conda 环境的 `python`；Windows 使用 `runtime/.venv/Scripts/python.exe`。
 
 ## Node.js 环境
 
-当前仓库没有 Node.js 依赖声明，也没有需要执行的 Node.js 安装步骤；Node.js 的版本要求及依赖安装方式：**待更新**。
+macOS 的 Node.js 与 pnpm 版本由根目录 `environment.yml` 管理；各 Web 应用的前端依赖在各自的 `package.json` 中声明。进入应用目录执行 `pnpm install` 后再运行构建。
 
 当前测试机器安装了 Node.js 20.17.0 和 npm 10.8.2。可用以下命令查看本机版本：
 

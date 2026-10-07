@@ -3,6 +3,8 @@ param(
   [switch]$NoBrowser
 )
 $ErrorActionPreference = 'Stop'
+$serverConfig = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'server.json') -Raw | ConvertFrom-Json
+$ports = @([int]$serverConfig.pagePort, [int]$serverConfig.servicePort)
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $pythonPath = Join-Path $repoRoot 'runtime/.venv/Scripts/python.exe'
 if (-not (Test-Path -LiteralPath $pythonPath)) {
@@ -12,7 +14,7 @@ if (-not (Test-Path -LiteralPath $pythonPath)) {
 $serviceScript = Join-Path $PSScriptRoot 'scripts/service.py'
 $viteScript = Join-Path $PSScriptRoot 'node_modules/vite/bin/vite.js'
 $owners = @(
-  foreach ($port in @(5185, 5186)) {
+  foreach ($port in $ports) {
     Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue |
       Select-Object -ExpandProperty OwningProcess
   }
@@ -25,7 +27,7 @@ foreach ($ownerPid in $owners) {
   $commandLine = [string]$process.CommandLine
   if ($commandLine.IndexOf($serviceScript, [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
       $commandLine.IndexOf($viteScript, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
-    throw "端口 5185 或 5186 被其他进程 $ownerPid 占用：$commandLine"
+    throw "配置中的端口 被其他进程 $ownerPid 占用：$commandLine"
   }
 }
 
@@ -39,13 +41,13 @@ if ($owners.Count -gt 0) {
   do {
     Start-Sleep -Milliseconds 100
     $remaining = @(
-      foreach ($port in @(5185, 5186)) {
+      foreach ($port in $ports) {
         Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue
       }
     )
   } while ($remaining.Count -gt 0 -and [DateTime]::UtcNow -lt $deadline)
   if ($remaining.Count -gt 0) {
-    throw '旧的vocabulary-atlas进程已停止，但端口 5185 或 5186 仍未释放'
+    throw '旧的vocabulary-atlas进程已停止，但配置中的端口 仍未释放'
   }
 }
 
