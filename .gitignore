@@ -46,3 +46,8 @@ Thumbs.db
 # Root-only scratch directories; nested skill tests/examples are source files
 /tests/
 /examples/
+
+# Downloaded dictionary resources; configured sources and attribution remain tracked
+/dictionaries/resources/*.csv
+/dictionaries/resources/*.gz
+/dictionaries/resources/*.download

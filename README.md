@@ -45,6 +45,8 @@ done
 
 按 `Ctrl+C` 停止。更新 Conda 环境时运行 `conda env update -f environment.yml --prune`。其他平台可参考 [运行环境说明](runtime/README.md) 和应用各自的 README。
 
+每个应用的 `server.json` 集中配置 `host`、`pagePort`（浏览器端口）和 `servicePort`（本地 API 端口）。编辑 `applications/<应用名>/server.json` 后重启应用即可生效；启动器会打印访问地址。`host` 仅支持 `127.0.0.1` 或 `localhost`，两个端口须不同且未被占用。
+
 ## 使用 Skills
 
 让 Agent 读取 [AGENTS.md](AGENTS.md) 与 [Skills 说明书](docs/Skills_说明书.md)，再根据任务打开相应的 `.agents/skills/<名称>/SKILL.md`。例如，`htd-ai-augmented-education` 是保留的项目路由 Skill，可帮助选择完成学习任务所需的能力。
@@ -56,3 +58,7 @@ done
 本仓库由 **[MySummertime](https://github.com/MySummertime)** 维护；新增内容及本仓库的改动由 MySummertime 负责。上游原有内容归其原作者 **[HytidelLegend](https://github.com/HytidelLegend/htd-ai-augmented-education)**（Hytidel），其版权声明保留在 [LICENSE](LICENSE) 中。
 
 本仓库沿用上游的 [CC BY-NC 4.0](LICENSE) 许可。分享或改编时，请标明上游来源、许可证及所作修改。该许可不包含商业使用授权；如需商业使用，应向相关权利人取得许可。
+
+### 内置词表
+
+所有内置词表集中在 [`dictionaries/wordlists/`](dictionaries/README.md)，每份词表各有一个子目录；共享完整词典资源位于 `dictionaries/resources/`。词汇图谱的“词表”分为“内置词表”和“我的词表”；扫描目录及格式在应用 `config.yaml` 的 `wordlists` 中配置。
