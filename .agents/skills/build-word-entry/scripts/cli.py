@@ -1263,8 +1263,8 @@ def main() -> int:
                     pause(workflow, state, "paused_relation_review", "invalid_relation_decision", str(exc), "publishing_list_result")
                     print(json.dumps({"run_id": run_id, "status": "paused_relation_review", "error": str(exc)}, ensure_ascii=False))
                     return 3
-            except Exception:
-                pass
+            except Exception as recovery_error:
+                print(json.dumps({"status": "recovery_error", "error": str(recovery_error)}, ensure_ascii=False), file=sys.stderr)
         print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 4 if args.command == "verify" else 2
 

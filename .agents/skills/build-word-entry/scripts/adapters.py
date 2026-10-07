@@ -68,16 +68,13 @@ def collect_site(page, site: str, word: str) -> dict:
     limits_exceeded = []
     preview_limits = []
     for selector in selectors[1:]:
-        try:
-            nodes = page.locator(selector).all()
-            if len(nodes) > 12:
-                preview_limits.append({"selector": selector, "matched": len(nodes), "retained": 12})
-            for index, item in enumerate(nodes[:12]):
-                value = " ".join(item.inner_text(timeout=3000).split())[:240]
-                if value:
-                    fragments.append({"locator": f"{selector}:nth({index})", "summary": value})
-        except Exception:
-            continue
+        nodes = page.locator(selector).all()
+        if len(nodes) > 12:
+            preview_limits.append({"selector": selector, "matched": len(nodes), "retained": 12})
+        for index, item in enumerate(nodes[:12]):
+            value = " ".join(item.inner_text(timeout=3000).split())[:240]
+            if value:
+                fragments.append({"locator": f"{selector}:nth({index})", "summary": value})
     block_selector = {"cambridge": ".def-block", "oxford": ".sense", "longman": ".Sense"}.get(site)
     if block_selector:
         child_selectors = {"cambridge": (".def", ".trans", ".examp"),
@@ -170,10 +167,7 @@ def collect_site(page, site: str, word: str) -> dict:
                 inflection_candidates.append(candidate)
                 seen.add(key)
     for selector in DERIVATIVE_SELECTORS.get(site, ()):
-        try:
-            links = page.eval_on_selector_all(selector, "nodes => nodes.map((node, index) => ({index, text: node.innerText || '', href: node.href || '', opposite: !!node.closest('.opp')}))")
-        except Exception:
-            continue
+        links = page.eval_on_selector_all(selector, "nodes => nodes.map((node, index) => ({index, text: node.innerText || '', href: node.href || '', opposite: !!node.closest('.opp')}))")
         if len(links) > SENSE_LIMIT:
             limits_exceeded.append(selector)
         for link in links[:SENSE_LIMIT]:

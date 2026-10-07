@@ -204,7 +204,7 @@ def edge_workflow(tmp_path, monkeypatch):
                   "end_ms": round((i + 1) * 900 / len(chunks))} for i, chunk in enumerate(chunks)]
         return source.read_bytes(), [{"items": items}]
     monkeypatch.setattr(EdgeTTSClient, "_stream", stream)
-    # Use the public adapter class, avoiding an independent importlib module identity.
+    # Instantiate the public adapter class.
     original_create = runner.create_client
     def create(state):
         if state.get("backend") == "edge-tts" and not state["mock"]:

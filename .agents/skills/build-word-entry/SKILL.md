@@ -77,3 +77,7 @@ AI 释义及例句通过结构检查后可进入总词库，保留 `generationMe
 `runtime/.venv/Scripts/python.exe .agents/skills/build-word-entry/scripts/spelling_relations.py start --full` 为已有项目全量补算；`start` 自动增量，`status / resume / verify --run-id <runId>` 操作原运行。共用状态机与算法位于 `utils/scripts/dictionary_spelling.py`，索引遵循 `utils/references/dictionary-spelling-v1.schema.json`。项目导入、词表修改及建词完成后自动维护；同族关系优先，后续确认同族时清理已有拼写关系，包括历史已审核关系。已独立建词条的屈折词形也归入原词词族。未建目标保持索引中的等待状态并在图谱展示，两端齐备后双向写入词条。Agent 不逐对判断拼写关系。
 
 状态机为 `prepared → snapshotting_vocabulary → selecting_pairs → calculating_similarity → preparing_updates → validating_updates → committing → verifying → completed`，失败进入 `paused_retryable_error`；日志和检查点位于 `logs/dictionary-spelling/runs/<run-id>/`。正式索引位于 `outputs/vocabulary-atlas/spelling-index.json`。
+
+## 离线词典数据的兼容格式
+
+Atlas 的独立本地导入程序 `utils/scripts/dictionary_lexicon.py` 使用 Schema 1.6：来源增加 ECDICT 与 WordNet，引用保留版本、许可证和资源 SHA256；`dictionaryGlossZh` 保存未逐义项对齐的整词译义，义项允许仅有原文或译文，例句允许没有来源译文。来源明确的派生和词面语义关系使用 `automatic_passed` 表示导入映射核验，不表示 Agent 或人工审核。旧版词条的双语、例句及审核约束保持有效。在线建词 Skill 继续采用原四站采集流程；离线导入由应用配置及独立脚本执行，不进入浏览器采集状态机。

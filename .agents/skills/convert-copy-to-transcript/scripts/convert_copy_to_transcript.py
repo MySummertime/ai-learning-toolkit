@@ -527,8 +527,8 @@ def _pause_after_error(root: Path, run_id: str, exc: Exception) -> None:
                 resume_stage=state["status"],
                 pending_decisions=list(state.get("pending_decisions", [])),
             )
-    except Exception:
-        return
+    except Exception as pause_error:
+        print(f"记录转换暂停状态失败：{pause_error}", file=sys.stderr)
 
 
 def build_parser() -> argparse.ArgumentParser:

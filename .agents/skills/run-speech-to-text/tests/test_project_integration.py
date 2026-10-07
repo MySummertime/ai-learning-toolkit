@@ -61,7 +61,7 @@ def test_uncertain_submit_resumes_query_without_resubmit(tmp_path, monkeypatch):
     with pytest.raises(TimeoutError):
         asr.run_request(tmp_path, request)
     run_dir = next((tmp_path / "outputs/run-speech-to-text/runs").iterdir())
-    # Editing global terms must not change the frozen per-run list.
+    # The per-run term list remains the snapshot captured at creation.
     (tmp_path / "utils/references/术语表.txt").write_text("新增词\n", encoding="utf-8")
     receipt = asr.resume_run(tmp_path, str(run_dir))
     assert receipt["status"] == "awaiting_transcript_approval"
