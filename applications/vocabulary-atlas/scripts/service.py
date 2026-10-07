@@ -396,8 +396,13 @@ def make_handler(store: DictionaryStore, runs: RunManager):
                 self._send(409, {"error": str(exc)})
             except FileNotFoundError as exc:
                 self._send(404, {"error": str(exc)})
-            except (ValueError, KeyError, IndexError, TypeError) as exc:
-                self._send(400, {"error": str(exc)})
+            except ValueError as exc:
+                runs.diagnostic("request_error", path=self.path, traceback=traceback.format_exc())
+                message = "词条查询暂时未完成，请稍后重试。" if "/api/runs" in self.path or "/api/jobs" in self.path else str(exc)
+                self._send(400, {"error": message})
+            except (KeyError, IndexError, TypeError) as exc:
+                runs.diagnostic("request_error", path=self.path, traceback=traceback.format_exc())
+                self._send(400, {"error": "操作未完成，请检查输入后重试。"})
             except Exception as exc:
                 self._send(500, {"error": f"服务错误：{exc}"})
 
